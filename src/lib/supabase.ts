@@ -272,6 +272,64 @@ export function subscribeToUpdateRequests(callback: (req: DBUpdateRequest) => vo
     .subscribe();
 }
 
+// ─── Suggestions (AI-generated + admin approval) ──────────────────────────
+
+export interface DBSuggestion {
+  id: string;
+  title: string;
+  description: string | null;
+  category: 'feature' | 'bug' | 'improvement' | 'performance' | 'ux';
+  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'approved' | 'in_progress' | 'implemented' | 'declined';
+  source: 'ai' | 'feedback_derived';
+  source_request_ids: string[];
+  implementation_summary: string | null;
+  created_at: string;
+  approved_at: string | null;
+  implemented_at: string | null;
+}
+
+export async function fetchSuggestions(): Promise<DBSuggestion[]> {
+  const { data, error } = await supabase
+    .from('mc_suggestions')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchSuggestions:', error); return []; }
+  return data || [];
+}
+
+export async function approveSuggestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_suggestions')
+    .update({ status: 'approved', approved_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) console.error('approveSuggestion:', error);
+}
+
+export async function declineSuggestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_suggestions')
+    .update({ status: 'declined' })
+    .eq('id', id);
+  if (error) console.error('declineSuggestion:', error);
+}
+
+export async function approveRequestForDev(reqId: string, notes?: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_update_requests')
+    .update({ approved_for_dev: true, dev_notes: notes || null, status: 'in_progress' })
+    .eq('id', reqId);
+  if (error) console.error('approveRequestForDev:', error);
+}
+
+export function subscribeToSuggestions(callback: (s: DBSuggestion) => void) {
+  return supabase
+    .channel('mc_suggestions_realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'mc_suggestions' },
+      payload => callback(payload.new as DBSuggestion))
+    .subscribe();
+}
+
 // ─── Realtime subscriptions ───────────────────────────────────────────────
 
 export function subscribeToChat(callback: (msg: DBChatMessage) => void) {

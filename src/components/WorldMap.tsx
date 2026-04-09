@@ -912,10 +912,28 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
             <span className="text-[10px] text-yellow-400/60">coins</span>
           </div>
 
-          {/* Controls */}
-          <div className="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg text-[11px] pointer-events-none"
+          {/* Controls hint — desktop only */}
+          <div className="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg text-[11px] pointer-events-none hidden sm:block"
             style={{ background:'rgba(0,0,0,0.55)', color:'rgba(255,255,255,0.5)', backdropFilter:'blur(4px)' }}>
             WASD · Arrow Keys
+          </div>
+
+          {/* Touch D-pad — mobile only */}
+          <div className="absolute bottom-16 right-3 sm:hidden pointer-events-auto select-none z-30">
+            <div className="grid gap-1" style={{ gridTemplateColumns: '44px 44px 44px', gridTemplateRows: '44px 44px 44px' }}>
+              {/* Row 1: empty, up, empty */}
+              <div />
+              <DPadBtn label="▲" onPress={() => keysRef.current.add('arrowup')} onRelease={() => { keysRef.current.delete('arrowup'); if(!keysRef.current.size) setPlayerStates(p => ({...p,[controlledMemberId]:{...p[controlledMemberId],moving:false}})); }} />
+              <div />
+              {/* Row 2: left, empty, right */}
+              <DPadBtn label="◀" onPress={() => keysRef.current.add('arrowleft')} onRelease={() => { keysRef.current.delete('arrowleft'); if(!keysRef.current.size) setPlayerStates(p => ({...p,[controlledMemberId]:{...p[controlledMemberId],moving:false}})); }} />
+              <div className="rounded-lg" style={{ background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.1)' }} />
+              <DPadBtn label="▶" onPress={() => keysRef.current.add('arrowright')} onRelease={() => { keysRef.current.delete('arrowright'); if(!keysRef.current.size) setPlayerStates(p => ({...p,[controlledMemberId]:{...p[controlledMemberId],moving:false}})); }} />
+              {/* Row 3: empty, down, empty */}
+              <div />
+              <DPadBtn label="▼" onPress={() => keysRef.current.add('arrowdown')} onRelease={() => { keysRef.current.delete('arrowdown'); if(!keysRef.current.size) setPlayerStates(p => ({...p,[controlledMemberId]:{...p[controlledMemberId],moving:false}})); }} />
+              <div />
+            </div>
           </div>
         </div>
 
@@ -954,8 +972,8 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
         </div>
       </div>
 
-      {/* Right sidebar */}
-      <div className="w-44 flex flex-col gap-3 shrink-0">
+      {/* Right sidebar — hidden on mobile */}
+      <div className="hidden sm:flex w-44 flex-col gap-3 shrink-0">
         <div className="rounded-xl p-3" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }}>
           <div className="text-[10px] font-bold text-blue-300/60 uppercase tracking-wider mb-2">Online Now</div>
           {members.filter(m => m.status !== 'offline').map(m => {
@@ -992,6 +1010,21 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Touch D-pad button ───────────────────────────────────────────────────────
+function DPadBtn({ label, onPress, onRelease }: { label: string; onPress: () => void; onRelease: () => void }) {
+  return (
+    <button
+      className="w-full h-full rounded-lg flex items-center justify-center text-white font-bold text-base active:scale-90 transition-transform"
+      style={{ background:'rgba(0,0,0,0.55)', border:'1px solid rgba(255,255,255,0.2)', backdropFilter:'blur(4px)', touchAction:'none' }}
+      onPointerDown={e => { e.preventDefault(); onPress(); }}
+      onPointerUp={e => { e.preventDefault(); onRelease(); }}
+      onPointerLeave={e => { e.preventDefault(); onRelease(); }}
+    >
+      {label}
+    </button>
   );
 }
 

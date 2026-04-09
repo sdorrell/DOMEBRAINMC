@@ -8,13 +8,14 @@ import Leaderboard from './components/Leaderboard';
 import BattleModal from './components/BattleModal';
 import ProjectsView from './components/ProjectsView';
 import UpdateRequests from './components/UpdateRequests';
+import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
 import { TEAM_MEMBERS, getLevelTier } from './data/gameData';
 import type { Zone } from './types';
 import './index.css';
 
-type Tab = 'world' | 'dashboard' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests';
+type Tab = 'world' | 'dashboard' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests' | 'admin';
 
 export default function App() {
   const [loggedInId, setLoggedInId] = useState<string | null>(() => {
@@ -94,7 +95,9 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     }
   };
 
-  const TABS: { id: Tab; label: string; emoji: string }[] = [
+  const isScott = controlledMemberId === 'scott';
+
+  const TABS: { id: Tab; label: string; emoji: string; adminOnly?: boolean }[] = [
     { id: 'world', label: 'World', emoji: '🗺️' },
     { id: 'dashboard', label: 'Activity', emoji: '📋' },
     { id: 'projects', label: 'Projects', emoji: '🏗️' },
@@ -102,6 +105,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     { id: 'badges', label: 'Badges', emoji: '🎖️' },
     { id: 'leaderboard', label: 'Leaderboard', emoji: '🏆' },
     { id: 'requests', label: 'Requests', emoji: '📬' },
+    ...(isScott ? [{ id: 'admin' as Tab, label: 'Upgrades', emoji: '⚡', adminOnly: true }] : []),
   ];
 
   const battleEnemy = battleTargetId ? liveMembers.find(m => m.id === battleTargetId) : null;
@@ -109,80 +113,79 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(135deg, #080814 0%, #0d1117 50%, #080814 100%)', color: '#e2e8f0' }}>
       {/* Header */}
-      <header className="flex items-center gap-4 px-5 py-3 shrink-0"
+      <header className="flex flex-col shrink-0"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)' }}>
-        {/* Logo */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-sm"
-            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 0 14px rgba(99,102,241,0.6)' }}>D</div>
-          <div>
-            <div className="font-black text-base tracking-tight text-white leading-none">DOME</div>
-            <div className="text-[9px] text-indigo-400 tracking-widest uppercase leading-none font-medium">Mission Control</div>
+        {/* Top row: logo + user */}
+        <div className="flex items-center gap-3 px-3 py-2">
+          {/* Logo */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-black text-xs"
+              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 0 14px rgba(99,102,241,0.6)' }}>D</div>
+            <div className="hidden sm:block">
+              <div className="font-black text-sm tracking-tight text-white leading-none">DOME</div>
+              <div className="text-[8px] text-indigo-400 tracking-widest uppercase leading-none font-medium">Mission Control</div>
+            </div>
+          </div>
+
+          {/* DB status */}
+          <div className="flex items-center gap-1 text-[10px]" style={{ color: ready ? '#22c55e' : '#f59e0b' }}>
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: ready ? '#22c55e' : '#f59e0b', boxShadow: `0 0 6px ${ready ? '#22c55e' : '#f59e0b'}` }} />
+            <span className="hidden sm:inline">{ready ? 'LIVE' : 'CONNECTING...'}</span>
+          </div>
+
+          {activeZone && tab === 'world' && (
+            <div className="text-[10px] px-2 py-1 rounded-lg flex items-center gap-1"
+              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }}>
+              <span>{activeZone.emoji}</span>
+              <span className="font-medium hidden sm:inline">{activeZone.name}</span>
+            </div>
+          )}
+
+          {/* Right side */}
+          <div className="ml-auto flex items-center gap-2">
+            {/* Coin display */}
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg"
+              style={{ background: 'rgba(255,214,0,0.1)', border: '1px solid rgba(255,214,0,0.25)' }}>
+              <span className="text-sm">💰</span>
+              <span className="font-black text-yellow-400 text-xs">{playerCoins}</span>
+            </div>
+
+            <div className="flex items-center gap-2 px-2 py-1 rounded-lg"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                style={{ background: me.avatarColor, boxShadow: `0 0 8px ${me.avatarColor}66` }}>{me.name[0]}</div>
+              <div className="hidden sm:block">
+                <div className="text-xs font-semibold text-white leading-none">{me.name}</div>
+                <div className="text-[9px] leading-none mt-0.5" style={{ color: myTier.color }}>Lv{me.level} · {me.xp.toLocaleString()} XP</div>
+              </div>
+              <div className="w-1.5 h-1.5 rounded-full bg-green-400" style={{ boxShadow: '0 0 4px #22c55e' }} />
+            </div>
+
+            <button onClick={onLogout}
+              className="text-xs px-2 py-1.5 rounded-lg transition-all"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280' }}
+              title="Switch user">↩</button>
           </div>
         </div>
 
-        {/* Nav */}
-        <nav className="flex gap-1 ml-4">
+        {/* Nav row — scrollable on mobile */}
+        <nav className="flex gap-1 px-3 pb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className="relative px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5"
+              className="relative shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1"
               style={tab === t.id
-                ? { background: 'rgba(99,102,241,0.25)', border: '1px solid rgba(99,102,241,0.45)', color: '#e0e7ff' }
-                : { background: 'transparent', border: '1px solid transparent', color: '#6b7280' }}>
+                ? { background: t.adminOnly ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.25)', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.55)' : 'rgba(99,102,241,0.45)'}`, color: t.adminOnly ? '#fde68a' : '#e0e7ff' }
+                : { background: t.adminOnly ? 'rgba(245,158,11,0.06)' : 'transparent', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.25)' : 'transparent'}`, color: t.adminOnly ? '#f59e0b' : '#6b7280' }}>
               <span>{t.emoji}</span>
-              <span>{t.label}</span>
+              <span className="hidden sm:inline">{t.label}</span>
               {pulseTab === t.id && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 animate-ping" />}
             </button>
           ))}
         </nav>
-
-        {/* Right */}
-        <div className="ml-auto flex items-center gap-3">
-          {/* DB status */}
-          <div className="flex items-center gap-1.5 text-[10px]"
-            style={{ color: ready ? '#22c55e' : '#f59e0b' }}>
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: ready ? '#22c55e' : '#f59e0b', boxShadow: `0 0 6px ${ready ? '#22c55e' : '#f59e0b'}` }} />
-            {ready ? 'LIVE' : 'CONNECTING...'}
-          </div>
-
-          {activeZone && tab === 'world' && (
-            <div className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }}>
-              <span>{activeZone.emoji}</span>
-              <span className="font-medium">{activeZone.name}</span>
-            </div>
-          )}
-
-          {/* Coin display */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
-            style={{ background: 'rgba(255,214,0,0.1)', border: '1px solid rgba(255,214,0,0.25)' }}>
-            <span className="text-base">💰</span>
-            <span className="font-black text-yellow-400 text-sm">{playerCoins}</span>
-          </div>
-
-          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
-              style={{ background: me.avatarColor, boxShadow: `0 0 10px ${me.avatarColor}66` }}>{me.name[0]}</div>
-            <div>
-              <div className="text-xs font-semibold text-white">{me.name}</div>
-              <div className="text-[10px]" style={{ color: myTier.color }}>Lv{me.level} · {me.xp.toLocaleString()} XP</div>
-            </div>
-            <div className="w-2 h-2 rounded-full bg-green-400 ml-1" style={{ boxShadow: '0 0 6px #22c55e' }} />
-          </div>
-
-          {/* Switch user */}
-          <button onClick={onLogout}
-            className="text-xs px-2.5 py-1.5 rounded-lg transition-all"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280' }}
-            title="Switch user">
-            ↩
-          </button>
-        </div>
       </header>
 
       {/* Content */}
-      <main className="flex-1 p-4 overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
+      <main className="flex-1 p-2 sm:p-4 overflow-hidden" style={{ height: 'calc(100vh - 80px)' }}>
         {tab === 'world' && (
           <WorldMap
             controlledMemberId={controlledMemberId}
@@ -200,6 +203,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
         {tab === 'badges' && <BadgesView />}
         {tab === 'leaderboard' && <Leaderboard liveMembers={liveMembers} />}
         {tab === 'requests' && <UpdateRequests currentUserId={controlledMemberId} />}
+        {tab === 'admin' && isScott && <AdminPanel currentUserId={controlledMemberId} />}
       </main>
 
       {/* Battle modal */}
