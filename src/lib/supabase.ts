@@ -153,6 +153,125 @@ export async function logXpEvent(memberId: string, xpDelta: number, reason: stri
   if (error) console.error('logXpEvent:', error);
 }
 
+// ─── PIN auth ─────────────────────────────────────────────────────────────
+
+async function sha256hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function getStoredPinHash(memberId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('mc_player_state')
+    .select('pin_hash')
+    .eq('member_id', memberId)
+    .single();
+  return data?.pin_hash ?? null;
+}
+
+export async function setPinHash(memberId: string, pin: string): Promise<void> {
+  const hash = await sha256hex(pin);
+  await supabase
+    .from('mc_player_state')
+    .update({ pin_hash: hash })
+    .eq('member_id', memberId);
+}
+
+export async function verifyPin(memberId: string, pin: string): Promise<boolean> {
+  const stored = await getStoredPinHash(memberId);
+  if (!stored) return false;
+  const hash = await sha256hex(pin);
+  return hash === stored;
+}
+
+// ─── DOME Brain live data ──────────────────────────────────────────────────
+
+export interface DBWorkSummary {
+  id: string;
+  team_member: string;
+  project_name: string;
+  session_date: string;
+  summary: string;
+  key_decisions: string | null;
+  next_steps: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export interface DBProjectContext {
+  id: string;
+  project_name: string;
+  description: string | null;
+  owner: string | null;
+  collaborators: string | null;
+  status: string;
+  goals: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchWorkSummaries(limit = 30): Promise<DBWorkSummary[]> {
+  const { data, error } = await supabase
+    .from('dome_work_summaries')
+    .select('id, team_member, project_name, session_date, summary, key_decisions, next_steps, tags, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('fetchWorkSummaries:', error); return []; }
+  return data || [];
+}
+
+export async function fetchProjectContexts(): Promise<DBProjectContext[]> {
+  const { data, error } = await supabase
+    .from('dome_project_context')
+    .select('id, project_name, description, owner, collaborators, status, goals, created_at, updated_at')
+    .order('updated_at', { ascending: false });
+  if (error) { console.error('fetchProjectContexts:', error); return []; }
+  return data || [];
+}
+
+// ─── Update Requests ───────────────────────────────────────────────────────
+
+export interface DBUpdateRequest {
+  id: string;
+  author_id: string;
+  title: string;
+  description: string | null;
+  category: 'feature' | 'bug' | 'improvement' | 'other';
+  status: 'open' | 'in_progress' | 'done' | 'declined';
+  upvotes: string[];
+  created_at: string;
+}
+
+export async function fetchUpdateRequests(): Promise<DBUpdateRequest[]> {
+  const { data, error } = await supabase
+    .from('mc_update_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchUpdateRequests:', error); return []; }
+  return data || [];
+}
+
+export async function createUpdateRequest(req: Omit<DBUpdateRequest, 'id' | 'created_at'>): Promise<void> {
+  const { error } = await supabase.from('mc_update_requests').insert(req);
+  if (error) console.error('createUpdateRequest:', error);
+}
+
+export async function toggleRequestUpvote(reqId: string, memberId: string, current: string[]): Promise<string[]> {
+  const next = current.includes(memberId)
+    ? current.filter(id => id !== memberId)
+    : [...current, memberId];
+  await supabase.from('mc_update_requests').update({ upvotes: next }).eq('id', reqId);
+  return next;
+}
+
+export function subscribeToUpdateRequests(callback: (req: DBUpdateRequest) => void) {
+  return supabase
+    .channel('mc_requests_realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'mc_update_requests' },
+      payload => callback(payload.new as DBUpdateRequest))
+    .subscribe();
+}
+
 // ─── Realtime subscriptions ───────────────────────────────────────────────
 
 export function subscribeToChat(callback: (msg: DBChatMessage) => void) {

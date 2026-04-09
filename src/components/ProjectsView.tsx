@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, IDEAS } from '../data/gameData';
+import { fetchProjectContexts, type DBProjectContext } from '../lib/supabase';
 import type { Idea } from '../types';
 
 // ─── PROJECT DATA ─────────────────────────────────────────────────────────────
@@ -289,15 +290,59 @@ function ProjectCard({ project, isExpanded, onToggle }: { project: Project; isEx
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
+function statusToProjectStatus(s: string): Project['status'] {
+  if (s === 'active' || s === 'in_progress') return 'active';
+  if (s === 'completed' || s === 'done') return 'completed';
+  if (s === 'on_hold' || s === 'paused') return 'on_hold';
+  return 'planning';
+}
+
+const PROJECT_COLORS = ['#6366f1','#10b981','#f59e0b','#ec4899','#06b6d4','#8b5cf6','#ef4444','#22c55e'];
+
 export default function ProjectsView() {
   const [expandedId, setExpandedId] = useState<string | null>('mission-control');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [promotingIdeaId, setPromotingIdeaId] = useState<string | null>(null);
   const [promotedIdeas, setPromotedIdeas] = useState<Set<string>>(new Set());
+  const [liveProjects, setLiveProjects] = useState<DBProjectContext[]>([]);
+  const [liveLoading, setLiveLoading] = useState(true);
+
+  useEffect(() => {
+    fetchProjectContexts().then(data => {
+      setLiveProjects(data);
+      setLiveLoading(false);
+    });
+  }, []);
+
+  // Convert live DOME Brain projects → Project cards (no tasks, just context)
+  const brainProjects: Project[] = liveProjects
+    .filter(lp => !PROJECTS.some(p => p.name.toLowerCase() === lp.project_name.toLowerCase()))
+    .map((lp, i) => ({
+      id: `brain_${lp.id}`,
+      name: lp.project_name,
+      emoji: '🧠',
+      description: lp.description || lp.goals || 'Active DOME Brain project',
+      status: statusToProjectStatus(lp.status),
+      ownerId: TEAM_MEMBERS.find(m => m.name.toLowerCase() === (lp.owner || '').toLowerCase())?.id || 'scott',
+      teamIds: (lp.collaborators || '').split(',').map(s => {
+        const name = s.trim().toLowerCase();
+        return TEAM_MEMBERS.find(m => m.name.toLowerCase().startsWith(name))?.id || '';
+      }).filter(Boolean),
+      color: PROJECT_COLORS[i % PROJECT_COLORS.length],
+      progress: lp.status === 'completed' ? 100 : lp.status === 'active' || lp.status === 'in_progress' ? 60 : 20,
+      tasks: [],
+      linkedIdeaIds: [],
+      startDate: lp.created_at?.split('T')[0] || '2026-01-01',
+      targetDate: '',
+      tags: ['dome-brain'],
+      isLive: true,
+    } as Project & { isLive?: boolean }));
+
+  const allProjects = [...PROJECTS, ...brainProjects];
 
   const filtered = statusFilter === 'all'
-    ? PROJECTS
-    : PROJECTS.filter(p => p.status === statusFilter);
+    ? allProjects
+    : allProjects.filter(p => p.status === statusFilter);
 
   // Stats
   const totalTasks = PROJECTS.flatMap(p => p.tasks).length;
@@ -312,7 +357,7 @@ export default function ProjectsView() {
         {/* Stats */}
         <div className="grid grid-cols-4 gap-3 shrink-0">
           {[
-            { label: 'Active Projects', value: PROJECTS.filter(p => p.status === 'active').length, color: '#22c55e', emoji: '🚀' },
+            { label: 'Active Projects', value: allProjects.filter(p => p.status === 'active').length, color: '#22c55e', emoji: '🚀' },
             { label: 'Tasks Done', value: `${doneTasks}/${totalTasks}`, color: '#6366f1', emoji: '✅' },
             { label: 'In Progress', value: inProgress, color: '#f59e0b', emoji: '⚡' },
             { label: 'Blocked', value: blockedTasks, color: '#ef4444', emoji: '⚠️', urgent: blockedTasks > 0 },
@@ -340,6 +385,9 @@ export default function ProjectsView() {
 
         {/* Projects */}
         <div className="flex-1 overflow-y-auto flex flex-col gap-3 pr-1">
+          {liveLoading && brainProjects.length === 0 && (
+            <div className="text-xs text-gray-600 animate-pulse px-1">Loading DOME Brain projects...</div>
+          )}
           {filtered.map(p => (
             <ProjectCard key={p.id} project={p} isExpanded={expandedId === p.id} onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)} />
           ))}

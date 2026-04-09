@@ -7,13 +7,14 @@ import BadgesView from './components/BadgesView';
 import Leaderboard from './components/Leaderboard';
 import BattleModal from './components/BattleModal';
 import ProjectsView from './components/ProjectsView';
+import UpdateRequests from './components/UpdateRequests';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
 import { TEAM_MEMBERS, getLevelTier } from './data/gameData';
 import type { Zone } from './types';
 import './index.css';
 
-type Tab = 'world' | 'dashboard' | 'projects' | 'ideas' | 'badges' | 'leaderboard';
+type Tab = 'world' | 'dashboard' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests';
 
 export default function App() {
   const [loggedInId, setLoggedInId] = useState<string | null>(() => {
@@ -93,12 +94,6 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     }
   };
 
-  // Pulse world tab on incoming chat
-  const prevChatLen = chatMessages.length;
-  if (prevChatLen > 0 && tab !== 'world' && !pulseTab) {
-    // handled inside WorldMap via prop
-  }
-
   const TABS: { id: Tab; label: string; emoji: string }[] = [
     { id: 'world', label: 'World', emoji: '🗺️' },
     { id: 'dashboard', label: 'Activity', emoji: '📋' },
@@ -106,6 +101,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     { id: 'ideas', label: 'Ideas', emoji: '💡' },
     { id: 'badges', label: 'Badges', emoji: '🎖️' },
     { id: 'leaderboard', label: 'Leaderboard', emoji: '🏆' },
+    { id: 'requests', label: 'Requests', emoji: '📬' },
   ];
 
   const battleEnemy = battleTargetId ? liveMembers.find(m => m.id === battleTargetId) : null;
@@ -198,11 +194,12 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
             liveMembers={liveMembers}
           />
         )}
-        {tab === 'dashboard' && <Dashboard />}
+        {tab === 'dashboard' && <Dashboard liveMembers={liveMembers} />}
         {tab === 'projects' && <ProjectsView />}
         {tab === 'ideas' && <IdeasBoard currentUserId={controlledMemberId} />}
         {tab === 'badges' && <BadgesView />}
         {tab === 'leaderboard' && <Leaderboard liveMembers={liveMembers} />}
+        {tab === 'requests' && <UpdateRequests currentUserId={controlledMemberId} />}
       </main>
 
       {/* Battle modal */}
