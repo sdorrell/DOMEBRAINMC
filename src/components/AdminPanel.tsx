@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   fetchSuggestions, approveSuggestion, declineSuggestion,
-  fetchUpdateRequests, approveRequestForDev, toggleRequestUpvote,
+  saveForLaterSuggestion, approveAllPendingSuggestions,
+  fetchUpdateRequests, approveRequestForDev,
   subscribeToSuggestions, subscribeToUpdateRequests,
+  getConfig, setConfig,
   type DBSuggestion, type DBUpdateRequest,
 } from '../lib/supabase';
 
@@ -35,14 +37,25 @@ function timeAgo(iso: string) {
 export default function AdminPanel({ currentUserId }: { currentUserId: string }) {
   const [suggestions, setSuggestions] = useState<DBSuggestion[]>([]);
   const [requests, setRequests] = useState<DBUpdateRequest[]>([]);
-  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented'>('ai');
+  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented' | 'settings'>('ai');
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
+  const [savingForLater, setSavingForLater] = useState<string | null>(null);
+  const [approvingAll, setApprovingAll] = useState(false);
+
+  // Settings / prompt customization
+  const [promptNotes, setPromptNotes] = useState('');
+  const [savedPromptNotes, setSavedPromptNotes] = useState('');
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [promptSaved, setPromptSaved] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchSuggestions(), fetchUpdateRequests()]).then(([s, r]) => {
+    Promise.all([fetchSuggestions(), fetchUpdateRequests(), getConfig('nightly_prompt_notes')]).then(([s, r, cfg]) => {
       setSuggestions(s);
       setRequests(r);
+      const notes = cfg || '';
+      setPromptNotes(notes);
+      setSavedPromptNotes(notes);
       setLoading(false);
     });
 
@@ -81,6 +94,25 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setApproving(null);
   };
 
+  const handleSaveForLater = async (id: string) => {
+    setSavingForLater(id);
+    await saveForLaterSuggestion(id);
+    setSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: 'saved' } : s));
+    setSavingForLater(null);
+  };
+
+  const handleApproveAll = async () => {
+    const ids = pendingSuggestions.map(s => s.id);
+    if (!ids.length) return;
+    setApprovingAll(true);
+    await approveAllPendingSuggestions(ids);
+    const now = new Date().toISOString();
+    setSuggestions(prev => prev.map(s =>
+      ids.includes(s.id) ? { ...s, status: 'approved', approved_at: now } : s
+    ));
+    setApprovingAll(false);
+  };
+
   const handleApproveRequest = async (reqId: string) => {
     setApproving(reqId);
     await approveRequestForDev(reqId);
@@ -88,7 +120,17 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setApproving(null);
   };
 
+  const handleSavePrompt = async () => {
+    setSavingPrompt(true);
+    await setConfig('nightly_prompt_notes', promptNotes);
+    setSavedPromptNotes(promptNotes);
+    setSavingPrompt(false);
+    setPromptSaved(true);
+    setTimeout(() => setPromptSaved(false), 2500);
+  };
+
   const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
+  const savedSuggestions = suggestions.filter(s => s.status === 'saved');
   const approvedSuggestions = suggestions.filter(s => s.status === 'approved' || s.status === 'in_progress');
   const implementedSuggestions = suggestions.filter(s => s.status === 'implemented');
   const openRequests = requests.filter(r => r.status === 'open' || r.status === 'in_progress')
@@ -97,10 +139,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     ? suggestions.reduce((latest, s) => s.created_at > latest ? s.created_at : latest, suggestions[0].created_at)
     : null;
 
+  const promptHasChanges = promptNotes !== savedPromptNotes;
+
   const SECTIONS = [
     { id: 'ai' as const, label: '🤖 AI Suggestions', count: pendingSuggestions.length + approvedSuggestions.length },
     { id: 'requests' as const, label: '📬 Team Requests', count: openRequests.length },
     { id: 'implemented' as const, label: '✅ Implemented', count: implementedSuggestions.length },
+    { id: 'settings' as const, label: '⚙️ Settings', count: 0 },
   ];
 
   return (
@@ -127,9 +172,9 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
         <div className="flex gap-3">
           {[
             { label: 'Pending', val: pendingSuggestions.length, color: '#a78bfa' },
-            { label: 'Approved', val: approvedSuggestions.length, color: '#fbbf24' },
-            { label: 'Implemented', val: implementedSuggestions.length, color: '#4ade80' },
-            { label: 'Team Requests', val: openRequests.length, color: '#60a5fa' },
+            { label: 'Saved', val: savedSuggestions.length, color: '#fbbf24' },
+            { label: 'Approved', val: approvedSuggestions.length, color: '#fb923c' },
+            { label: 'Shipped', val: implementedSuggestions.length, color: '#4ade80' },
           ].map(s => (
             <div key={s.label} className="px-3 py-2 rounded-xl text-center"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -179,8 +224,9 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                     </div>
                     <div className="flex flex-col gap-2">
                       {approvedSuggestions.map(s => (
-                        <SuggestionCard key={s.id} s={s} approving={approving}
-                          onApprove={handleApproveSuggestion} onDecline={handleDeclineSuggestion} />
+                        <SuggestionCard key={s.id} s={s} approving={approving} savingForLater={savingForLater}
+                          onApprove={handleApproveSuggestion} onDecline={handleDeclineSuggestion}
+                          onSaveForLater={handleSaveForLater} />
                       ))}
                     </div>
                   </div>
@@ -191,6 +237,16 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                   <div className="text-xs font-bold text-purple-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                     <span>💡 Awaiting Your Review</span>
                     <div className="flex-1 h-px" style={{ background: 'rgba(167,139,250,0.2)' }} />
+                    {/* Approve All button */}
+                    {pendingSuggestions.length > 1 && (
+                      <button
+                        onClick={handleApproveAll}
+                        disabled={approvingAll}
+                        className="px-3 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5 shrink-0"
+                        style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
+                        {approvingAll ? '⏳ Approving...' : `✅ Approve All (${pendingSuggestions.length})`}
+                      </button>
+                    )}
                   </div>
                   {pendingSuggestions.length === 0 ? (
                     <div className="text-center py-10 text-gray-600 text-sm">
@@ -199,12 +255,29 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                   ) : (
                     <div className="flex flex-col gap-2">
                       {pendingSuggestions.map(s => (
-                        <SuggestionCard key={s.id} s={s} approving={approving}
-                          onApprove={handleApproveSuggestion} onDecline={handleDeclineSuggestion} />
+                        <SuggestionCard key={s.id} s={s} approving={approving} savingForLater={savingForLater}
+                          onApprove={handleApproveSuggestion} onDecline={handleDeclineSuggestion}
+                          onSaveForLater={handleSaveForLater} />
                       ))}
                     </div>
                   )}
                 </div>
+
+                {/* Saved for Later */}
+                {savedSuggestions.length > 0 && (
+                  <div className="mt-1">
+                    <div className="text-xs font-bold text-yellow-600 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <span>🔖 Saved for Later</span>
+                      <div className="flex-1 h-px" style={{ background: 'rgba(234,179,8,0.15)' }} />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {savedSuggestions.map(s => (
+                        <SavedCard key={s.id} s={s} approving={approving}
+                          onApprove={handleApproveSuggestion} onDecline={handleDeclineSuggestion} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -249,6 +322,90 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                 ))}
               </div>
             )}
+
+            {/* ── Settings ── */}
+            {activeSection === 'settings' && (
+              <div className="flex flex-col gap-5">
+                {/* Prompt customization */}
+                <div className="rounded-2xl p-5 flex flex-col gap-4"
+                  style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-lg">🤖</span>
+                      <h3 className="text-white font-bold text-sm">Nightly AI Prompt Notes</h3>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      Add custom instructions for the nightly AI agent. These are injected into Step 3 when it generates new suggestions.
+                      Use this to steer ideas toward specific priorities, themes, or constraints.
+                    </p>
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      className="w-full rounded-xl px-4 py-3 text-sm text-white outline-none resize-none leading-relaxed"
+                      style={{
+                        background: 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${promptHasChanges ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                        minHeight: '160px',
+                        fontFamily: 'inherit',
+                      }}
+                      placeholder={`Examples:\n• Focus on improving the Leaderboard tab this week\n• We're onboarding 3 new agents soon — prioritize first-time experience ideas\n• Avoid anything that requires a DB migration\n• The team is burned out on battles, skip battle-related suggestions for now`}
+                      value={promptNotes}
+                      onChange={e => setPromptNotes(e.target.value)}
+                    />
+                    {promptHasChanges && (
+                      <div className="absolute top-2 right-2 text-[10px] text-indigo-400 font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: 'rgba(99,102,241,0.2)' }}>
+                        unsaved
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-gray-600">
+                      Takes effect at the next 2am run · {promptNotes.length} chars
+                    </p>
+                    <button
+                      onClick={handleSavePrompt}
+                      disabled={savingPrompt || !promptHasChanges}
+                      className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
+                      style={{
+                        background: promptSaved
+                          ? 'linear-gradient(135deg, #4ade80, #22c55e)'
+                          : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        boxShadow: promptSaved ? '0 0 15px rgba(74,222,128,0.3)' : '0 0 15px rgba(99,102,241,0.3)',
+                      }}>
+                      {savingPrompt ? 'Saving...' : promptSaved ? '✓ Saved!' : 'Save Instructions'}
+                    </button>
+                  </div>
+
+                  {savedPromptNotes && !promptHasChanges && (
+                    <div className="rounded-xl p-3 text-xs text-gray-400"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <span className="text-gray-600 font-semibold mr-1">Active:</span>
+                      {savedPromptNotes}
+                    </div>
+                  )}
+                </div>
+
+                {/* Info cards */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { icon: '🕐', title: 'Schedule', body: 'Runs every night at 2:00 AM automatically.' },
+                    { icon: '🔖', title: 'Save for Later', body: 'Saved suggestions are skipped by the AI — they\'re yours to approve whenever.' },
+                    { icon: '✅', title: 'Approve All', body: 'One click to queue every pending suggestion for tonight\'s implementation run.' },
+                    { icon: '💡', title: 'Generating Ideas', body: 'AI reads team feedback + your prompt notes, then creates 5 fresh suggestions nightly.' },
+                  ].map(c => (
+                    <div key={c.title} className="p-4 rounded-xl"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <div className="text-xl mb-2">{c.icon}</div>
+                      <div className="text-white text-xs font-bold mb-1">{c.title}</div>
+                      <div className="text-gray-500 text-[11px] leading-relaxed">{c.body}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -270,15 +427,17 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
 
 // ─── Sub-components ────────────────────────────────────────────────────────
 
-function SuggestionCard({ s, approving, onApprove, onDecline }: {
+function SuggestionCard({ s, approving, savingForLater, onApprove, onDecline, onSaveForLater }: {
   s: DBSuggestion;
   approving: string | null;
+  savingForLater: string | null;
   onApprove: (id: string) => void;
   onDecline: (id: string) => void;
+  onSaveForLater: (id: string) => void;
 }) {
   const pri = PRIORITY_STYLE[s.priority] || PRIORITY_STYLE.medium;
   const isApproved = s.status === 'approved' || s.status === 'in_progress';
-  const isLoading = approving === s.id;
+  const isLoading = approving === s.id || savingForLater === s.id;
 
   return (
     <div className="p-4 rounded-xl transition-all"
@@ -306,32 +465,93 @@ function SuggestionCard({ s, approving, onApprove, onDecline }: {
             <p className="text-xs text-gray-400 leading-relaxed mb-3">{s.description}</p>
           )}
           {!isApproved && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => onApprove(s.id)}
-                disabled={!!isLoading}
+                disabled={isLoading}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
                 style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
-                {isLoading ? '...' : '✅ Approve'}
+                {approving === s.id ? '...' : '✅ Approve'}
+              </button>
+              <button
+                onClick={() => onSaveForLater(s.id)}
+                disabled={isLoading}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', color: '#fbbf24' }}>
+                {savingForLater === s.id ? '...' : '🔖 Save for Later'}
               </button>
               <button
                 onClick={() => onDecline(s.id)}
-                disabled={!!isLoading}
+                disabled={isLoading}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
-                {isLoading ? '...' : '✗ Skip'}
+                {approving === s.id ? '...' : '✗ Skip'}
               </button>
             </div>
           )}
           {isApproved && (
             <button
               onClick={() => onDecline(s.id)}
-              disabled={!!isLoading}
+              disabled={isLoading}
               className="px-2.5 py-1 rounded-lg text-[11px] transition-all"
               style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280' }}>
               Undo approval
             </button>
           )}
+        </div>
+        <div className="text-[10px] text-gray-600 shrink-0 mt-1">
+          {new Date(s.created_at).toLocaleDateString()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SavedCard({ s, approving, onApprove, onDecline }: {
+  s: DBSuggestion;
+  approving: string | null;
+  onApprove: (id: string) => void;
+  onDecline: (id: string) => void;
+}) {
+  const pri = PRIORITY_STYLE[s.priority] || PRIORITY_STYLE.medium;
+  const isLoading = approving === s.id;
+
+  return (
+    <div className="p-4 rounded-xl transition-all"
+      style={{ background: 'rgba(234,179,8,0.04)', border: '1px solid rgba(234,179,8,0.15)' }}>
+      <div className="flex items-start gap-3">
+        <div className="text-2xl mt-0.5 shrink-0">{CATEGORY_EMOJI[s.category] || '💬'}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="font-bold text-white text-sm">{s.title}</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+              style={{ color: pri.color, background: pri.bg }}>
+              {pri.label}
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full text-yellow-600"
+              style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.2)' }}>
+              🔖 Saved
+            </span>
+          </div>
+          {s.description && (
+            <p className="text-xs text-gray-400 leading-relaxed mb-3">{s.description}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => onApprove(s.id)}
+              disabled={isLoading}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+              style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
+              {isLoading ? '...' : '✅ Approve Now'}
+            </button>
+            <button
+              onClick={() => onDecline(s.id)}
+              disabled={isLoading}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
+              {isLoading ? '...' : '✗ Remove'}
+            </button>
+          </div>
         </div>
         <div className="text-[10px] text-gray-600 shrink-0 mt-1">
           {new Date(s.created_at).toLocaleDateString()}

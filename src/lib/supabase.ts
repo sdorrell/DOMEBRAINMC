@@ -280,7 +280,7 @@ export interface DBSuggestion {
   description: string | null;
   category: 'feature' | 'bug' | 'improvement' | 'performance' | 'ux';
   priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'approved' | 'in_progress' | 'implemented' | 'declined';
+  status: 'pending' | 'approved' | 'in_progress' | 'implemented' | 'declined' | 'saved';
   source: 'ai' | 'feedback_derived';
   source_request_ids: string[];
   implementation_summary: string | null;
@@ -312,6 +312,42 @@ export async function declineSuggestion(id: string): Promise<void> {
     .update({ status: 'declined' })
     .eq('id', id);
   if (error) console.error('declineSuggestion:', error);
+}
+
+export async function saveForLaterSuggestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_suggestions')
+    .update({ status: 'saved' })
+    .eq('id', id);
+  if (error) console.error('saveForLaterSuggestion:', error);
+}
+
+export async function approveAllPendingSuggestions(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const { error } = await supabase
+    .from('mc_suggestions')
+    .update({ status: 'approved', approved_at: new Date().toISOString() })
+    .in('id', ids);
+  if (error) console.error('approveAllPendingSuggestions:', error);
+}
+
+// ─── App Config (key-value store) ─────────────────────────────────────────
+
+export async function getConfig(key: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('mc_config')
+    .select('value')
+    .eq('key', key)
+    .maybeSingle();
+  if (error) { console.error('getConfig:', error); return null; }
+  return data?.value ?? null;
+}
+
+export async function setConfig(key: string, value: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_config')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) console.error('setConfig:', error);
 }
 
 export async function approveRequestForDev(reqId: string, notes?: string): Promise<void> {
