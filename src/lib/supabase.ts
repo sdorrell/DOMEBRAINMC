@@ -375,6 +375,14 @@ export async function approveRequestForDev(reqId: string, notes?: string): Promi
   if (error) console.error('approveRequestForDev:', error);
 }
 
+export async function unapproveRequest(reqId: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_update_requests')
+    .update({ approved_for_dev: false, dev_notes: null, status: 'open' })
+    .eq('id', reqId);
+  if (error) console.error('unapproveRequest:', error);
+}
+
 export function subscribeToSuggestions(callback: (s: DBSuggestion) => void) {
   return supabase
     .channel('mc_suggestions_realtime')

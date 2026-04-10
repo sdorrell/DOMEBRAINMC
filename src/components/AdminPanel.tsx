@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   fetchSuggestions, approveSuggestion, declineSuggestion,
   saveForLaterSuggestion, approveAllPendingSuggestions,
-  fetchUpdateRequests, approveRequestForDev,
+  fetchUpdateRequests, approveRequestForDev, unapproveRequest, toggleRequestUpvote,
   subscribeToSuggestions, subscribeToUpdateRequests,
   getConfig, setConfig,
   type DBSuggestion, type DBUpdateRequest,
@@ -127,6 +127,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setSavingPrompt(false);
     setPromptSaved(true);
     setTimeout(() => setPromptSaved(false), 2500);
+  };
+
+  const handleUnapproveRequest = async (reqId: string) => {
+    setApproving(reqId);
+    await unapproveRequest(reqId);
+    setRequests(prev => prev.map(r => r.id === reqId ? { ...r, approved_for_dev: false, status: 'open' as const } : r));
+    setApproving(null);
   };
 
   const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
@@ -287,7 +294,7 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                 {openRequests.length === 0 ? (
                   <div className="text-center py-10 text-gray-600 text-sm">No open requests from the team yet</div>
                 ) : openRequests.map(r => (
-                  <RequestCard key={r.id} r={r} approving={approving} onApprove={handleApproveRequest} currentUserId={currentUserId} />
+                  <RequestCard key={r.id} r={r} approving={approving} onApprove={handleApproveRequest} onUnapprove={handleUnapproveRequest} currentUserId={currentUserId} />
                 ))}
               </div>
             )}
@@ -561,10 +568,11 @@ function SavedCard({ s, approving, onApprove, onDecline }: {
   );
 }
 
-function RequestCard({ r, approving, onApprove, currentUserId }: {
+function RequestCard({ r, approving, onApprove, onUnapprove, currentUserId }: {
   r: DBUpdateRequest & { approved_for_dev?: boolean };
   approving: string | null;
   onApprove: (id: string) => void;
+  onUnapprove: (id: string) => void;
   currentUserId: string;
 }) {
   const st = STATUS_STYLE[r.status] || STATUS_STYLE.open;
@@ -601,7 +609,7 @@ function RequestCard({ r, approving, onApprove, currentUserId }: {
           {r.description && (
             <p className="text-xs text-gray-400 leading-relaxed mb-2">{r.description}</p>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {!isApproved && (
               <button
                 onClick={() => onApprove(r.id)}
@@ -609,6 +617,15 @@ function RequestCard({ r, approving, onApprove, currentUserId }: {
                 className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
                 style={{ background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24' }}>
                 {isLoading ? '...' : '⚡ Send to Dev'}
+              </button>
+            )}
+            {isApproved && (
+              <button
+                onClick={() => onUnapprove(r.id)}
+                disabled={!!isLoading}
+                className="px-2.5 py-1 rounded-lg text-[11px] transition-all"
+                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
+                {isLoading ? '...' : '↩ Undo approval'}
               </button>
             )}
             <span className="text-[10px] text-gray-600">{r.author_id} · {new Date(r.created_at).toLocaleDateString()}</span>

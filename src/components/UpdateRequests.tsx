@@ -129,8 +129,9 @@ export default function UpdateRequests({ currentUserId }: Props) {
             onChange={e => setDescription(e.target.value)}
           />
 
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-gray-500 font-medium">Category:</div>
+          {/* Category row */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-xs text-gray-500 font-medium shrink-0">Category:</div>
             {(Object.keys(CATEGORY_CONFIG) as DBUpdateRequest['category'][]).map(cat => {
               const cfg = CATEGORY_CONFIG[cat];
               const active = category === cat;
@@ -146,13 +147,14 @@ export default function UpdateRequests({ currentUserId }: Props) {
                 </button>
               );
             })}
-
-            <button onClick={handleSubmit} disabled={!title.trim() || submitting}
-              className="ml-auto px-5 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
-              {submitting ? 'Submitting...' : 'Submit →'}
-            </button>
           </div>
+
+          {/* Submit button — own row so it's always reachable on mobile */}
+          <button onClick={handleSubmit} disabled={!title.trim() || submitting}
+            className="w-full px-5 py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 0 20px rgba(99,102,241,0.35)' }}>
+            {submitting ? 'Submitting...' : '✓ Submit Request'}
+          </button>
         </div>
       )}
 

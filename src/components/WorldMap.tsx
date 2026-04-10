@@ -559,6 +559,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
 
   const [chatInput, setChatInput] = useState('');
   const [showEmotes, setShowEmotes] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [currentZone, setCurrentZone] = useState<Zone | null>(null);
   const [hoveredMember, setHoveredMember] = useState<TeamMember | null>(null);
   const [nearbyMember, setNearbyMember] = useState<TeamMember | null>(null);
@@ -912,11 +913,76 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
             <span className="text-[10px] text-yellow-400/60">coins</span>
           </div>
 
-          {/* Controls hint — desktop only */}
-          <div className="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg text-[11px] pointer-events-none hidden sm:block"
-            style={{ background:'rgba(0,0,0,0.55)', color:'rgba(255,255,255,0.5)', backdropFilter:'blur(4px)' }}>
-            WASD · Arrow Keys
+          {/* Controls hint + Help button */}
+          <div className="absolute top-3 right-3 flex items-center gap-2">
+            <div className="px-2.5 py-1.5 rounded-lg text-[11px] pointer-events-none hidden sm:block"
+              style={{ background:'rgba(0,0,0,0.55)', color:'rgba(255,255,255,0.5)', backdropFilter:'blur(4px)' }}>
+              WASD · Arrow Keys
+            </div>
+            <button
+              onClick={() => setShowHelp(v => !v)}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black text-white transition-all hover:scale-110"
+              style={{ background: showHelp ? 'rgba(99,102,241,0.7)' : 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.3)', backdropFilter: 'blur(4px)' }}>
+              ?
+            </button>
           </div>
+
+          {/* Help overlay */}
+          {showHelp && (
+            <div className="absolute inset-0 flex items-center justify-center z-40 p-4"
+              style={{ background: 'rgba(0,5,20,0.92)', backdropFilter: 'blur(8px)' }}
+              onClick={() => setShowHelp(false)}>
+              <div className="rounded-2xl p-5 w-full max-w-sm max-h-full overflow-y-auto"
+                style={{ background: 'rgba(10,20,50,0.98)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 0 40px rgba(99,102,241,0.2)' }}
+                onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-black text-base">🗺️ Mission Control Guide</h3>
+                  <button onClick={() => setShowHelp(false)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                </div>
+                <div className="flex flex-col gap-4 text-xs text-gray-300">
+                  <HelpSection title="🕹️ Movement" color="#60a5fa">
+                    Use <strong className="text-white">Arrow Keys</strong> or <strong className="text-white">WASD</strong> to walk your character around the map. On mobile, use the <strong className="text-white">D-pad</strong> in the bottom-right corner.
+                  </HelpSection>
+                  <HelpSection title="🏘️ Biome Zones" color="#a78bfa">
+                    <div className="flex flex-col gap-1 mt-1">
+                      {[
+                        { e:'🟢', n:'Grind Zone', d:'The daily work area. Log sessions and track progress.' },
+                        { e:'🟣', n:'Idea Lab', d:'Submit and upvote ideas for the team.' },
+                        { e:'🔴', n:'War Room', d:'Battle Arena — challenge teammates to XP duels.' },
+                        { e:'🟤', n:'Coffee Corner', d:'Casual hangout. Drop emotes, chat freely.' },
+                        { e:'🔵', n:'Watercooler', d:'Team social hub. See who\'s online and what\'s happening.' },
+                        { e:'🟡', n:'Trophy Wall', d:'Leaderboard area — check XP rankings and badges.' },
+                      ].map(z => (
+                        <div key={z.n} className="flex gap-2">
+                          <span className="shrink-0 w-4">{z.e}</span>
+                          <span><strong className="text-white">{z.n}:</strong> {z.d}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </HelpSection>
+                  <HelpSection title="⚔️ Arena Battles" color="#f87171">
+                    Walk near a teammate to see the <strong className="text-white">Challenge</strong> button. Win battles to earn <strong className="text-white">XP and coins</strong>. Battles are best-of-3 trivia rounds. Your record is tracked on your profile.
+                  </HelpSection>
+                  <HelpSection title="💬 Chat & Emotes" color="#34d399">
+                    Type in the chat bar below the map to send a message to the whole team in real time. Hit the <strong className="text-white">😄</strong> button to fire off a floating emote above your character.
+                  </HelpSection>
+                  <HelpSection title="⭐ XP & Levels" color="#fbbf24">
+                    You earn XP by logging work summaries, winning battles, submitting ideas, and being active. Every level-up unlocks a new <strong className="text-white">tier title</strong> and boosts your leaderboard rank.
+                  </HelpSection>
+                  <HelpSection title="🏅 Badges" color="#c084fc">
+                    Badges are earned by hitting milestones — first login, first idea, first battle win, and more. Day-1 badges are achievable right now. Long-term badges are lifetime goals. Check the <strong className="text-white">Badges tab</strong> for the full list.
+                  </HelpSection>
+                  <HelpSection title="💡 Ideas Board" color="#38bdf8">
+                    Submit feature ideas or projects in the <strong className="text-white">Ideas tab</strong>. Upvote teammates' ideas to push them up the list. The most-upvoted ideas get attention first.
+                  </HelpSection>
+                  <HelpSection title="📋 Requests" color="#fb923c">
+                    Found a bug or want a new Mission Control feature? Submit it in the <strong className="text-white">Requests tab</strong>. Scott reviews requests nightly and approved ones get built automatically.
+                  </HelpSection>
+                </div>
+                <div className="mt-4 text-center text-[10px] text-gray-600">Click anywhere outside or press ✕ to close</div>
+              </div>
+            </div>
+          )}
 
           {/* Touch D-pad — mobile only */}
           <div className="absolute bottom-16 right-3 sm:hidden pointer-events-auto select-none z-30">
@@ -1028,7 +1094,20 @@ function DPadBtn({ label, onPress, onRelease }: { label: string; onPress: () => 
   );
 }
 
+function HelpSection({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: `${color}11`, border: `1px solid ${color}33` }}>
+      <div className="font-bold text-[11px] mb-1.5" style={{ color }}>{title}</div>
+      <div className="leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
 const BADGE_EMOJI: Record<string,string> = {
+  // Day-1 badges
+  pioneer:'🚩', first_steps:'👟', spark:'✨', voter:'🗳️',
+  first_blood:'⚔️', request_filed:'📋', brain_initiate:'🧠', word_smith:'📖',
+  // Long-term badges
   brain_dump:'🧠', oracle:'🔮', librarian:'📚', project_whisperer:'🏗️',
   dawn_patrol:'🌅', night_owl:'🦉', idea_volcano:'💡', peoples_champion:'👑',
   democracy_enjoyer:'🗳️', hyperdrive:'⚡', hot_streak:'🔥', dome_fossil:'💎',
