@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { IDEAS, TEAM_MEMBERS } from '../data/gameData';
+import { addXp } from '../lib/supabase';
 import type { Idea } from '../types';
 
 type SortMode = 'votes' | 'newest' | 'status';
@@ -40,17 +41,25 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
     return 0;
   });
 
-  const handleVote = (id: string) => {
-    setIdeas(prev => prev.map(idea => {
-      if (idea.id !== id) return idea;
-      const hasVoted = idea.upvotes.includes(currentUserId);
-      return {
-        ...idea,
-        upvotes: hasVoted
-          ? idea.upvotes.filter(u => u !== currentUserId)
-          : [...idea.upvotes, currentUserId],
-      };
-    }));
+  const handleVote = async (id: string) => {
+    const idea = ideas.find(i => i.id === id);
+    if (!idea) return;
+    const hasVoted = idea.upvotes.includes(currentUserId);
+    const newUpvotes = hasVoted
+      ? idea.upvotes.filter(u => u !== currentUserId)
+      : [...idea.upvotes, currentUserId];
+
+    // Optimistic update
+    setIdeas(prev => prev.map(i => i.id === id ? { ...i, upvotes: newUpvotes } : i));
+
+    if (!hasVoted) {
+      // Award 5 XP to the voter
+      addXp(currentUserId, 5, `Upvoted idea: "${idea.title}"`).catch(() => {});
+      // Award 75 XP to the idea author when their idea hits 5 upvotes
+      if (newUpvotes.length === 5 && idea.authorId !== currentUserId) {
+        addXp(idea.authorId, 75, `Your idea "${idea.title}" reached 5 upvotes!`).catch(() => {});
+      }
+    }
   };
 
   const handleSubmit = () => {
@@ -79,6 +88,7 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
         <div>
           <h2 className="text-lg font-bold text-white">💡 Ideas Board</h2>
           <p className="text-xs text-gray-400">Submit ideas, upvote what matters, ship what wins.</p>
+          <p className="text-[10px] text-indigo-400 mt-0.5">⚡ +5 XP per upvote · +75 XP to authors whose idea hits 5 votes</p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           {/* Status filter */}

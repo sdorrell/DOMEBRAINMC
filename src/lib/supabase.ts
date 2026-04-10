@@ -153,6 +153,23 @@ export async function logXpEvent(memberId: string, xpDelta: number, reason: stri
   if (error) console.error('logXpEvent:', error);
 }
 
+// ─── XP helper — log event + increment player XP atomically ───────────────
+
+export async function addXp(memberId: string, delta: number, reason: string): Promise<void> {
+  await logXpEvent(memberId, delta, reason);
+  const { data } = await supabase
+    .from('mc_player_state')
+    .select('xp')
+    .eq('member_id', memberId)
+    .maybeSingle();
+  if (data) {
+    await supabase
+      .from('mc_player_state')
+      .update({ xp: (data.xp || 0) + delta, updated_at: new Date().toISOString() })
+      .eq('member_id', memberId);
+  }
+}
+
 // ─── PIN auth ─────────────────────────────────────────────────────────────
 
 async function sha256hex(text: string): Promise<string> {

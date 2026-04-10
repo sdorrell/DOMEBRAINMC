@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, IDEAS } from '../data/gameData';
-import { fetchProjectContexts, type DBProjectContext } from '../lib/supabase';
+import { fetchProjectContexts, fetchWorkSummaries, type DBProjectContext, type DBWorkSummary } from '../lib/supabase';
 import type { Idea } from '../types';
 
 // ─── PROJECT DATA ─────────────────────────────────────────────────────────────
@@ -176,6 +176,34 @@ const PRIORITY_CFG = {
   critical: { label: 'Critical', color: '#ef4444' },
 };
 
+// ─── HEALTH INDICATOR ─────────────────────────────────────────────────────────
+
+type HealthStatus = 'green' | 'yellow' | 'red' | null;
+
+const HEALTH_CFG: Record<'green' | 'yellow' | 'red', { color: string; label: string; emoji: string }> = {
+  green:  { color: '#22c55e', label: 'Active',   emoji: '🟢' },
+  yellow: { color: '#f59e0b', label: 'Quiet',    emoji: '🟡' },
+  red:    { color: '#ef4444', label: 'Stale',    emoji: '🔴' },
+};
+
+function getProjectHealth(projectName: string, summaries: DBWorkSummary[]): HealthStatus {
+  if (!summaries.length) return null;
+  const nameLower = projectName.toLowerCase();
+  const keywords = nameLower.split(/\s+/).filter(w => w.length > 3);
+  const matches = summaries.filter(ws => {
+    const wsName = ws.project_name.toLowerCase();
+    return keywords.some(kw => wsName.includes(kw)) || wsName.includes(nameLower.slice(0, 8));
+  });
+  if (!matches.length) return null;
+  const mostRecent = matches.reduce((a, b) =>
+    new Date(a.created_at) > new Date(b.created_at) ? a : b
+  );
+  const daysSince = Math.floor((Date.now() - new Date(mostRecent.created_at).getTime()) / 86400000);
+  if (daysSince < 7)  return 'green';
+  if (daysSince < 14) return 'yellow';
+  return 'red';
+}
+
 function timeToDate(iso?: string) {
   if (!iso) return null;
   const d = new Date(iso);
@@ -213,12 +241,13 @@ function TaskRow({ task }: { task: Task }) {
   );
 }
 
-function ProjectCard({ project, isExpanded, onToggle }: { project: Project; isExpanded: boolean; onToggle: () => void }) {
+function ProjectCard({ project, isExpanded, onToggle, health }: { project: Project; isExpanded: boolean; onToggle: () => void; health: HealthStatus }) {
   const owner = TEAM_MEMBERS.find(m => m.id === project.ownerId);
   const statusCfg = STATUS_CFG[project.status];
   const doneTasks = project.tasks.filter(t => t.status === 'done').length;
   const totalTasks = project.tasks.length;
   const blockedCount = project.tasks.filter(t => t.status === 'blocked').length;
+  const healthCfg = health ? HEALTH_CFG[health] : null;
 
   const sortedTasks = [...project.tasks].sort((a, b) => {
     const order = { blocked: 0, in_progress: 1, todo: 2, done: 3 };
@@ -240,6 +269,13 @@ function ProjectCard({ project, isExpanded, onToggle }: { project: Project; isEx
             <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: statusCfg.bg, color: statusCfg.color }}>{statusCfg.label}</span>
             {blockedCount > 0 && (
               <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-red-500/20 text-red-400">⚠️ {blockedCount} blocked</span>
+            )}
+            {healthCfg && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                style={{ background: healthCfg.color + '22', color: healthCfg.color, border: `1px solid ${healthCfg.color}44` }}
+                title={`DOME Brain activity: ${healthCfg.label}`}
+              >{healthCfg.emoji} {healthCfg.label}</span>
             )}
           </div>
           <p className="text-xs text-gray-400 mt-0.5 truncate">{project.description}</p>
@@ -306,12 +342,14 @@ export default function ProjectsView() {
   const [promotedIdeas, setPromotedIdeas] = useState<Set<string>>(new Set());
   const [liveProjects, setLiveProjects] = useState<DBProjectContext[]>([]);
   const [liveLoading, setLiveLoading] = useState(true);
+  const [workSummaries, setWorkSummaries] = useState<DBWorkSummary[]>([]);
 
   useEffect(() => {
     fetchProjectContexts().then(data => {
       setLiveProjects(data);
       setLiveLoading(false);
     });
+    fetchWorkSummaries(100).then(data => setWorkSummaries(data));
   }, []);
 
   // Convert live DOME Brain projects → Project cards (no tasks, just context)
@@ -389,7 +427,13 @@ export default function ProjectsView() {
             <div className="text-xs text-gray-600 animate-pulse px-1">Loading DOME Brain projects...</div>
           )}
           {filtered.map(p => (
-            <ProjectCard key={p.id} project={p} isExpanded={expandedId === p.id} onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)} />
+            <ProjectCard
+              key={p.id}
+              project={p}
+              isExpanded={expandedId === p.id}
+              onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+              health={getProjectHealth(p.name, workSummaries)}
+            />
           ))}
         </div>
       </div>
