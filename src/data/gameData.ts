@@ -338,6 +338,16 @@ export const BADGES: Badge[] = [
     requirement: 'Duplicate idea within 48h',
     rarity: 'common',
   },
+  {
+    id: 'coin_rat',
+    name: 'Coin Rat',
+    emoji: '🐀',
+    descriptor: 'Uploaded garbage to DOME Brain just to farm XP. Everyone can see this. You should feel bad.',
+    category: 'negative',
+    isTemporary: false,
+    requirement: 'Flagged by admin for spamming DOME Brain',
+    rarity: 'rare',
+  },
 ];
 
 export const BADGE_MAP = Object.fromEntries(BADGES.map(b => [b.id, b]));

@@ -5,8 +5,10 @@ import {
   fetchUpdateRequests, approveRequestForDev, unapproveRequest, toggleRequestUpvote,
   subscribeToSuggestions, subscribeToUpdateRequests,
   getConfig, setConfig,
-  type DBSuggestion, type DBUpdateRequest,
+  fetchWorkSummaries, getFlaggedSessions, flagSpamSession, unflagSpamSession,
+  type DBSuggestion, type DBUpdateRequest, type DBWorkSummary,
 } from '../lib/supabase';
+import { TEAM_MEMBERS } from '../data/gameData';
 
 const PRIORITY_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   high:   { color: '#ff6b6b', bg: 'rgba(255,107,107,0.12)', label: '🔴 High' },
@@ -34,14 +36,23 @@ function timeAgo(iso: string) {
   return 'just now';
 }
 
+function resolveMemberId(teamMemberName: string): string | null {
+  const lower = teamMemberName.toLowerCase().trim();
+  const m = TEAM_MEMBERS.find(tm => lower.includes(tm.name.toLowerCase()));
+  return m?.id ?? null;
+}
+
 export default function AdminPanel({ currentUserId }: { currentUserId: string }) {
   const [suggestions, setSuggestions] = useState<DBSuggestion[]>([]);
   const [requests, setRequests] = useState<DBUpdateRequest[]>([]);
-  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented' | 'settings'>('ai');
+  const [workSummaries, setWorkSummaries] = useState<DBWorkSummary[]>([]);
+  const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
+  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented' | 'settings' | 'moderation'>('ai');
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [savingForLater, setSavingForLater] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
+  const [flagging, setFlagging] = useState<string | null>(null);
 
   // Settings / prompt customization
   const [promptNotes, setPromptNotes] = useState('');
@@ -50,9 +61,17 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
   const [promptSaved, setPromptSaved] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchSuggestions(), fetchUpdateRequests(), getConfig('nightly_prompt_notes')]).then(([s, r, cfg]) => {
+    Promise.all([
+      fetchSuggestions(),
+      fetchUpdateRequests(),
+      getConfig('nightly_prompt_notes'),
+      fetchWorkSummaries(40),
+      getFlaggedSessions(),
+    ]).then(([s, r, cfg, ws, flags]) => {
       setSuggestions(s);
       setRequests(r);
+      setWorkSummaries(ws);
+      setFlaggedIds(flags);
       const notes = cfg || '';
       setPromptNotes(notes);
       setSavedPromptNotes(notes);
@@ -136,6 +155,24 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setApproving(null);
   };
 
+  const handleFlagSession = async (session: DBWorkSummary) => {
+    const memberId = resolveMemberId(session.team_member);
+    if (!memberId) { alert(`Can't resolve member for "${session.team_member}"`); return; }
+    setFlagging(session.id);
+    await flagSpamSession(session.id, memberId);
+    setFlaggedIds(prev => [...prev, session.id]);
+    setFlagging(null);
+  };
+
+  const handleUnflagSession = async (session: DBWorkSummary) => {
+    const memberId = resolveMemberId(session.team_member);
+    if (!memberId) return;
+    setFlagging(session.id);
+    await unflagSpamSession(session.id, memberId);
+    setFlaggedIds(prev => prev.filter(id => id !== session.id));
+    setFlagging(null);
+  };
+
   const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
   const savedSuggestions = suggestions.filter(s => s.status === 'saved');
   const approvedSuggestions = suggestions.filter(s => s.status === 'approved' || s.status === 'in_progress');
@@ -152,6 +189,7 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     { id: 'ai' as const, label: '🤖 AI Suggestions', count: pendingSuggestions.length + approvedSuggestions.length },
     { id: 'requests' as const, label: '📬 Team Requests', count: openRequests.length },
     { id: 'implemented' as const, label: '✅ Implemented', count: implementedSuggestions.length },
+    { id: 'moderation' as const, label: '🐀 Moderation', count: flaggedIds.length },
     { id: 'settings' as const, label: '⚙️ Settings', count: 0 },
   ];
 
@@ -327,6 +365,108 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ── Moderation ── */}
+            {activeSection === 'moderation' && (
+              <div className="flex flex-col gap-3">
+                <div className="rounded-xl p-4 flex items-start gap-3"
+                  style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <div className="text-2xl">🐀</div>
+                  <div>
+                    <div className="text-white font-bold text-sm mb-1">DOME Brain Spam Enforcement</div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Flag any session that's clearly garbage uploaded just to farm XP.
+                      Flagging hits the offender with <span className="text-red-400 font-bold">–250 XP</span> and the permanent <span className="text-red-400 font-bold">🐀 Coin Rat</span> badge.
+                      Everyone on the Leaderboard can see it.
+                    </p>
+                  </div>
+                </div>
+
+                {workSummaries.length === 0 ? (
+                  <div className="text-center py-10 text-gray-600 text-sm">No sessions logged yet</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {workSummaries.map(ws => {
+                      const isFlagged = flaggedIds.includes(ws.id);
+                      const isLoading = flagging === ws.id;
+                      const memberId = resolveMemberId(ws.team_member);
+                      const member = TEAM_MEMBERS.find(m => m.id === memberId);
+
+                      return (
+                        <div
+                          key={ws.id}
+                          className="p-4 rounded-xl transition-all"
+                          style={{
+                            background: isFlagged ? 'rgba(239,68,68,0.07)' : 'rgba(255,255,255,0.03)',
+                            border: `1px solid ${isFlagged ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Avatar */}
+                            <div
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5"
+                              style={{ background: member?.avatarColor || '#555' }}
+                            >
+                              {ws.team_member[0]}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <span className="font-bold text-white text-sm">{ws.team_member}</span>
+                                <span className="text-xs text-gray-500">·</span>
+                                <span className="text-xs text-indigo-300">{ws.project_name}</span>
+                                <span className="text-xs text-gray-500">·</span>
+                                <span className="text-[11px] text-gray-600">{ws.session_date}</span>
+                                {isFlagged && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                                    style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171' }}>
+                                    🐀 Flagged — –250 XP applied
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">
+                                {ws.summary}
+                              </p>
+                              {ws.tags && ws.tags.length > 0 && (
+                                <div className="flex gap-1 flex-wrap mt-1.5">
+                                  {ws.tags.slice(0, 5).map(t => (
+                                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-500">{t}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Action */}
+                            <div className="shrink-0 ml-2">
+                              {!isFlagged ? (
+                                <button
+                                  onClick={() => handleFlagSession(ws)}
+                                  disabled={isLoading || !memberId}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40"
+                                  style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}
+                                  title={!memberId ? `Can't match "${ws.team_member}" to a team member` : ''}
+                                >
+                                  {isLoading ? '...' : '🚩 Flag as Spam'}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleUnflagSession(ws)}
+                                  disabled={isLoading}
+                                  className="px-3 py-1.5 rounded-lg text-xs transition-all disabled:opacity-40"
+                                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}
+                                >
+                                  {isLoading ? '...' : '↩ Undo'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

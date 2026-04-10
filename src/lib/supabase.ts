@@ -386,6 +386,34 @@ export async function setConfig(key: string, value: string): Promise<void> {
   if (error) console.error('setConfig:', error);
 }
 
+// ─── Spam / XP-farming moderation ─────────────────────────────────────────
+
+export async function getFlaggedSessions(): Promise<string[]> {
+  const val = await getConfig('spam_flagged_sessions');
+  if (!val) return [];
+  try { return JSON.parse(val) as string[]; } catch { return []; }
+}
+
+export async function flagSpamSession(sessionId: string, memberId: string): Promise<void> {
+  // Record the flagged session ID
+  const current = await getFlaggedSessions();
+  if (!current.includes(sessionId)) {
+    await setConfig('spam_flagged_sessions', JSON.stringify([...current, sessionId]));
+  }
+  // XP penalty — stings enough to matter
+  await addXp(memberId, -250, '🐀 XP farming penalty — DOME Brain spam flagged by admin');
+  // Permanent shame badge
+  await awardBadge(memberId, 'coin_rat');
+}
+
+export async function unflagSpamSession(sessionId: string, memberId: string): Promise<void> {
+  // Remove from flagged list
+  const current = await getFlaggedSessions();
+  await setConfig('spam_flagged_sessions', JSON.stringify(current.filter(id => id !== sessionId)));
+  // Restore the XP
+  await addXp(memberId, 250, '✅ XP farming flag reversed by admin');
+}
+
 export async function approveRequestForDev(reqId: string, notes?: string): Promise<void> {
   const { error } = await supabase
     .from('mc_update_requests')
