@@ -146,6 +146,25 @@ export async function awardBadge(memberId: string, badgeId: string) {
 
 // ─── XP events ────────────────────────────────────────────────────────────
 
+export interface DBXpEvent {
+  id: string;
+  member_id: string;
+  xp_delta: number;
+  reason: string;
+  created_at: string;
+}
+
+export async function fetchXpEvents(memberId: string, limit = 50): Promise<DBXpEvent[]> {
+  const { data, error } = await supabase
+    .from('mc_xp_events')
+    .select('*')
+    .eq('member_id', memberId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('fetchXpEvents:', error); return []; }
+  return data || [];
+}
+
 export async function logXpEvent(memberId: string, xpDelta: number, reason: string) {
   const { error } = await supabase
     .from('mc_xp_events')

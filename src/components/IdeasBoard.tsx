@@ -1,8 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-import { IDEAS, TEAM_MEMBERS } from '../data/gameData';
-import { addXp } from '../lib/supabase';
+import { TEAM_MEMBERS } from '../data/gameData';
+import { addXp, fetchIdeas, createIdea as dbCreateIdea, toggleUpvote as dbToggleUpvote } from '../lib/supabase';
+import type { DBIdea } from '../lib/supabase';
 import type { Idea } from '../types';
+
+function mapDbIdea(db: DBIdea): Idea {
+  return {
+    id: db.id,
+    title: db.title,
+    description: db.description || '',
+    authorId: db.author_id,
+    upvotes: db.upvotes || [],
+    createdAt: db.created_at,
+    status: (db.status === 'done' ? 'completed' : db.status === 'rejected' ? 'declined' : db.status) as Idea['status'],
+    tags: db.tags || [],
+  };
+}
 
 type SortMode = 'votes' | 'newest' | 'status';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed';
@@ -24,8 +38,16 @@ function timeAgo(iso: string): string {
 }
 
 export default function IdeasBoard({ currentUserId }: { currentUserId: string }) {
-  const [ideas, setIdeas] = useState<Idea[]>(IDEAS);
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortMode>('votes');
+
+  useEffect(() => {
+    fetchIdeas().then(data => {
+      setIdeas(data.map(mapDbIdea));
+      setLoading(false);
+    });
+  }, []);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showNewIdea, setShowNewIdea] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -45,36 +67,47 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
     const idea = ideas.find(i => i.id === id);
     if (!idea) return;
     const hasVoted = idea.upvotes.includes(currentUserId);
-    const newUpvotes = hasVoted
+    const optimisticUpvotes = hasVoted
       ? idea.upvotes.filter(u => u !== currentUserId)
       : [...idea.upvotes, currentUserId];
 
     // Optimistic update
-    setIdeas(prev => prev.map(i => i.id === id ? { ...i, upvotes: newUpvotes } : i));
+    setIdeas(prev => prev.map(i => i.id === id ? { ...i, upvotes: optimisticUpvotes } : i));
+
+    // Persist to Supabase
+    const confirmedUpvotes = await dbToggleUpvote(id, currentUserId, idea.upvotes);
+    setIdeas(prev => prev.map(i => i.id === id ? { ...i, upvotes: confirmedUpvotes } : i));
 
     if (!hasVoted) {
       // Award 5 XP to the voter
       addXp(currentUserId, 5, `Upvoted idea: "${idea.title}"`).catch(() => {});
       // Award 75 XP to the idea author when their idea hits 5 upvotes
-      if (newUpvotes.length === 5 && idea.authorId !== currentUserId) {
+      if (confirmedUpvotes.length === 5 && idea.authorId !== currentUserId) {
         addXp(idea.authorId, 75, `Your idea "${idea.title}" reached 5 upvotes!`).catch(() => {});
       }
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!newTitle.trim()) return;
-    const newIdea: Idea = {
-      id: Date.now().toString(),
+    const tags = newTags.split(',').map(t => t.trim()).filter(Boolean);
+
+    // Persist to Supabase
+    const saved = await dbCreateIdea({
       title: newTitle.trim(),
-      description: newDesc.trim(),
-      authorId: currentUserId,
-      upvotes: [currentUserId],
-      createdAt: new Date().toISOString(),
+      description: newDesc.trim() || null,
+      author_id: currentUserId,
       status: 'open',
-      tags: newTags.split(',').map(t => t.trim()).filter(Boolean),
-    };
-    setIdeas(prev => [newIdea, ...prev]);
+      tags,
+      upvotes: [currentUserId],
+    });
+
+    if (saved) {
+      setIdeas(prev => [mapDbIdea(saved), ...prev]);
+      // Award XP for submitting an idea
+      addXp(currentUserId, 25, `Submitted idea: "${saved.title}"`).catch(() => {});
+    }
+
     setNewTitle(''); setNewDesc(''); setNewTags('');
     setShowNewIdea(false);
   };
@@ -162,6 +195,12 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
 
       {/* Ideas list */}
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
+        {loading && (
+          <div className="flex items-center justify-center py-12 text-gray-500 text-sm">Loading ideas...</div>
+        )}
+        {!loading && sorted.length === 0 && (
+          <div className="flex items-center justify-center py-12 text-gray-600 text-sm">No ideas yet — submit the first one!</div>
+        )}
         {sorted.map((idea, idx) => {
           const author = TEAM_MEMBERS.find(m => m.id === idea.authorId);
           const hasVoted = idea.upvotes.includes(currentUserId);
