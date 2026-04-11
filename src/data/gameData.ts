@@ -9,10 +9,10 @@ export const BADGES: Badge[] = [
     id: 'pioneer',
     name: 'Pioneer',
     emoji: '🚩',
-    descriptor: 'One of the first 7 people in Mission Control. You helped prove this wasn\'t a terrible idea.',
+    descriptor: 'One of the original 7 founding members of DOME Mission Control. You were here at day zero.',
     category: 'legend',
     isTemporary: false,
-    requirement: 'Be part of the founding team',
+    requirement: 'Be one of the 7 founding team members',
     rarity: 'epic',
   },
   {
@@ -200,10 +200,10 @@ export const BADGES: Badge[] = [
     id: 'dome_fossil',
     name: 'DOME Fossil',
     emoji: '💎',
-    descriptor: 'On the team for 1+ year. You were here before we had furniture.',
+    descriptor: 'Been grinding with DOME for over a year. You\'ve survived long enough to be considered ancient.',
     category: 'legend',
     isTemporary: false,
-    requirement: '1+ year on the team',
+    requirement: '1+ year on the DOME team (based on joinedDate)',
     rarity: 'epic',
   },
   {
@@ -367,7 +367,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 400,
     battleWins: 5,
     battleLosses: 1,
-    badges: ['pioneer', 'first_steps', 'spark', 'voter', 'brain_initiate'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'spark', 'voter', 'brain_initiate'],
     activeBadges: [],
     worldX: 8,
     worldY: 6,
@@ -387,7 +387,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 362,
     battleWins: 4,
     battleLosses: 2,
-    badges: ['pioneer', 'first_steps', 'request_filed', 'word_smith', 'brain_initiate'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'request_filed', 'word_smith', 'brain_initiate'],
     activeBadges: [],
     worldX: 22,
     worldY: 8,
@@ -407,7 +407,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 300,
     battleWins: 3,
     battleLosses: 2,
-    badges: ['pioneer', 'first_steps', 'voter', 'spark'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'voter', 'spark'],
     activeBadges: [],
     worldX: 14,
     worldY: 15,
@@ -427,7 +427,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 262,
     battleWins: 3,
     battleLosses: 2,
-    badges: ['pioneer', 'first_steps', 'spark', 'request_filed'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'spark', 'request_filed'],
     activeBadges: [],
     worldX: 6,
     worldY: 18,
@@ -447,7 +447,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 231,
     battleWins: 2,
     battleLosses: 2,
-    badges: ['pioneer', 'first_steps', 'brain_initiate'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'brain_initiate'],
     activeBadges: [],
     worldX: 30,
     worldY: 12,
@@ -467,7 +467,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 187,
     battleWins: 2,
     battleLosses: 1,
-    badges: ['pioneer', 'first_steps', 'first_blood'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps', 'first_blood'],
     activeBadges: [],
     worldX: 26,
     worldY: 19,
@@ -487,7 +487,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 131,
     battleWins: 1,
     battleLosses: 1,
-    badges: ['pioneer', 'first_steps'],
+    badges: ['pioneer', 'dome_fossil', 'first_steps'],
     activeBadges: [],
     worldX: 18,
     worldY: 4,
@@ -507,7 +507,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     coins: 155,
     battleWins: 0,
     battleLosses: 0,
-    badges: ['pioneer', 'first_steps'],
+    badges: ['first_steps'],
     activeBadges: [],
     worldX: 22,
     worldY: 12,
@@ -715,6 +715,20 @@ export const ZONES: Zone[] = [
     description: 'Where legends are immortalized. Check your rank.',
     action: 'View Leaderboard',
   },
+  {
+    id: 'green_couch',
+    name: 'The Green Couch',
+    emoji: '🛋️',
+    color: '#1a4d1a',
+    tiles: [
+      {x:10,y:9},{x:11,y:9},{x:12,y:9},{x:13,y:9},{x:14,y:9},
+      {x:10,y:10},{x:11,y:10},{x:12,y:10},{x:13,y:10},{x:14,y:10},
+      {x:10,y:11},{x:11,y:11},{x:12,y:11},{x:13,y:11},{x:14,y:11},
+      {x:10,y:12},{x:11,y:12},{x:12,y:12},{x:13,y:12},{x:14,y:12},
+    ],
+    description: 'The legendary green couch where DOME Meetings happen. Gather here.',
+    action: 'Start DOME Meeting',
+  },
 ];
 
 // ─── EMOTES ───────────────────────────────────────────────────────────────────
@@ -740,7 +754,7 @@ export const BASE_BATTLE_ACTIONS: BattleAction[] = [
   { id: 'strike',  name: 'Basic Strike',  emoji: '⚔️',  cost: 0,  damageMin: 8,  damageMax: 16, description: 'Reliable. Costs nothing. Gets the job done.' },
   { id: 'power',   name: 'Power Blow',    emoji: '💥',  cost: 15, damageMin: 22, damageMax: 34, description: 'Spend coins for real damage.' },
   { id: 'shield',  name: 'Shield Up',     emoji: '🛡️',  cost: 0,  damageMin: 0,  damageMax: 0,  shieldTurns: 1, description: 'Block 65% of the next hit. Free.' },
-  { id: 'potion',  name: 'Coin Potion',   emoji: '🧪',  cost: 30, damageMin: 0,  damageMax: 0,  healAmount: 28, description: 'Restore 28 HP. Crucial when desperate.' },
+  { id: 'potion',  name: 'Coin Potion',   emoji: '🧪',  cost: 20, damageMin: 0,  damageMax: 0,  healAmount: 35, description: 'Restore 35 HP. Cheaper and stronger — fights last longer.' },
   { id: 'torch',   name: 'Torch It',      emoji: '🔥',  cost: 20, damageMin: 12, damageMax: 18, burnTurns: 3,   description: 'Lights them on fire. 8 burn damage per turn for 3 turns.' },
   { id: 'freeze',  name: 'Ice Block',     emoji: '❄️',  cost: 25, damageMin: 6,  damageMax: 10, freezeTurns: 1, description: 'Freezes the enemy — they skip their next turn.' },
   { id: 'boost',   name: 'Hyperfocus',    emoji: '⚡',  cost: 20, damageMin: 0,  damageMax: 0,  boostSelf: 2,   description: 'Enter hyperfocus mode. +60% damage for 2 turns.' },
@@ -791,7 +805,7 @@ export const ULTIMATES: Record<string, BattleAction> = {
 };
 
 export function getBattleMaxHP(level: number): number {
-  return 80 + level * 12;
+  return 110 + level * 14; // Buffed: more HP = longer fights, more strategy
 }
 
 export function getBattleActions(role: string): BattleAction[] {

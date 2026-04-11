@@ -58,6 +58,7 @@ export default function Dashboard({ liveMembers }: { liveMembers?: TeamMember[] 
         {members.map(m => {
           const tier = getLevelTier(m.level);
           const earnedBadges = BADGES.filter(b => m.badges.includes(b.id));
+          const brainPushes = workLogs.filter(l => resolveMember(l.team_member)?.id === m.id).length;
           return (
             <button key={m.id} onClick={() => setFilter(filter === m.id ? 'all' : m.id)}
               className="rounded-2xl p-3 text-left transition-all"
@@ -79,10 +80,18 @@ export default function Dashboard({ liveMembers }: { liveMembers?: TeamMember[] 
                   style={{ background: m.status === 'online' ? '#22c55e' : '#6b7280', boxShadow: m.status === 'online' ? '0 0 6px #22c55e' : 'none' }} />
               </div>
               <XPBar current={m.xp} next={m.xpToNext} color={m.avatarColor} />
-              <div className="flex gap-1 mt-1.5 flex-wrap">
-                {earnedBadges.slice(0, 4).map(b => (
-                  <span key={b.id} title={b.name} className="text-xs">{b.emoji}</span>
-                ))}
+              <div className="flex items-center justify-between mt-1.5">
+                <div className="flex gap-1 flex-wrap">
+                  {earnedBadges.slice(0, 3).map(b => (
+                    <span key={b.id} title={b.name} className="text-xs">{b.emoji}</span>
+                  ))}
+                </div>
+                {!loading && (
+                  <div className="text-[9px] font-bold shrink-0 flex items-center gap-0.5"
+                    style={{ color: brainPushes > 0 ? m.avatarColor : '#374151' }}>
+                    🧠 {brainPushes}
+                  </div>
+                )}
               </div>
             </button>
           );

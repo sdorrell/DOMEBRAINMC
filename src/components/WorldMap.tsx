@@ -25,6 +25,7 @@ const BIOME: Record<string, { top: string; topHL: string; wall1: string; wall2: 
   coffee_corner:{ top:'#6d4c41', topHL:'#8d6e63', wall1:'#4e342e', wall2:'#3e2723', outline:'#1a0d08' },
   watercooler:  { top:'#0277bd', topHL:'#0288d1', wall1:'#01579b', wall2:'#014080', outline:'#002244' },
   trophy_wall:  { top:'#c47d0e', topHL:'#f9a825', wall1:'#8d5e00', wall2:'#7a5000', outline:'#3d2800' },
+  green_couch:  { top:'#145214', topHL:'#2e7d2e', wall1:'#0a3d0a', wall2:'#083508', outline:'#011a01' },
 };
 
 // ─── COORDINATE MATH ──────────────────────────────────────────────────────────
@@ -283,6 +284,83 @@ function drawColumn(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1
     ctx.arc(x+dx*s, y-dy*s, 2*s, 0, Math.PI*2);
     ctx.fill();
   });
+}
+
+/** Iconic Green Couch (DOME Meeting spot) */
+function drawCouch(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1, tick=0) {
+  const s = scale;
+  const glow = 0.55 + 0.1 * Math.sin(tick * 0.04);
+
+  // Soft green ambient glow
+  const grad = ctx.createRadialGradient(x, y-8*s, 2*s, x, y-8*s, 28*s);
+  grad.addColorStop(0, `rgba(46,125,50,${glow * 0.55})`);
+  grad.addColorStop(1, 'rgba(46,125,50,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(x, y-8*s, 28*s, 16*s, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Couch body (sectional — draw as two cushion blocks)
+  const couchW = 28*s, couchH = 14*s, couchY = y-8*s;
+
+  // Back rest
+  ctx.fillStyle = '#1b5e20';
+  ctx.beginPath();
+  ctx.roundRect(x - couchW/2, couchY - couchH*0.85, couchW, couchH*0.45, 4*s);
+  ctx.fill();
+
+  // Seat cushions — left
+  ctx.fillStyle = '#2e7d32';
+  ctx.beginPath();
+  ctx.roundRect(x - couchW/2, couchY - couchH*0.45, couchW*0.46, couchH*0.5, 3*s);
+  ctx.fill();
+  // divider line on left cushion
+  ctx.strokeStyle = '#1b5e20';
+  ctx.lineWidth = 1*s;
+  ctx.beginPath();
+  ctx.moveTo(x - couchW*0.04, couchY - couchH*0.45);
+  ctx.lineTo(x - couchW*0.04, couchY + couchH*0.05);
+  ctx.stroke();
+
+  // Seat cushions — right
+  ctx.fillStyle = '#388e3c';
+  ctx.beginPath();
+  ctx.roundRect(x - couchW/2 + couchW*0.54, couchY - couchH*0.45, couchW*0.46, couchH*0.5, 3*s);
+  ctx.fill();
+
+  // Armrests
+  ctx.fillStyle = '#1a4d1a';
+  // left arm
+  ctx.beginPath();
+  ctx.roundRect(x - couchW/2 - 4*s, couchY - couchH*0.5, 5*s, couchH*0.6, 2*s);
+  ctx.fill();
+  // right arm
+  ctx.beginPath();
+  ctx.roundRect(x + couchW/2 - 1*s, couchY - couchH*0.5, 5*s, couchH*0.6, 2*s);
+  ctx.fill();
+
+  // Legs (4 tiny squares)
+  ctx.fillStyle = '#0a3a0a';
+  [[-couchW/2+3*s, 3*s], [-couchW/2+3*s + couchW*0.4, 3*s],
+   [couchW/2-6*s, 3*s], [couchW/2-6*s - couchW*0.4, 3*s]].forEach(([dx, dy]) => {
+    ctx.fillRect(x + (dx as number), couchY + (dy as number), 3*s, 4*s);
+  });
+
+  // "DOME MEETING" label tag — pulsing
+  ctx.save();
+  ctx.globalAlpha = 0.7 + 0.15 * Math.sin(tick * 0.06);
+  ctx.font = `bold ${Math.round(7*s)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tagW = 54*s, tagH = 10*s;
+  const tagX = x - tagW/2, tagY = couchY - couchH - 12*s;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.beginPath();
+  ctx.roundRect(tagX, tagY, tagW, tagH, 3*s);
+  ctx.fill();
+  ctx.fillStyle = '#69f07a';
+  ctx.fillText('🛋️ DOME MEETING', x, tagY + tagH/2);
+  ctx.restore();
 }
 
 // ─── GRASS TILE ───────────────────────────────────────────────────────────────
@@ -755,6 +833,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
           coffee_corner:(c,x,y,s) => drawMushroom(c,x,y,s),
           watercooler:(c,x,y,s,t) => drawIce(c,x,y,s,t),
           trophy_wall:(c,x,y,s) => drawColumn(c,x,y,s),
+          green_couch:(c,x,y,s,t) => drawCouch(c,x,y,s,t),
         };
 
         const decorFn = decorators[zone.id];
@@ -1092,6 +1171,8 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
           <div className="text-[10px] font-bold text-blue-300/60 uppercase tracking-wider mb-2">Online Now</div>
           {members.filter(m => m.status !== 'offline').map(m => {
             const tier = getLevelTier(m.level);
+            const ps = playerStates[m.id];
+            const onCouch = ps ? ZONE_TILE_SET[`${ps.x},${ps.y}`]?.id === 'green_couch' : false;
             return (
               <div key={m.id} className="flex items-center gap-2 mb-2">
                 <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0"
@@ -1101,10 +1182,13 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
                     {m.name}
                     {m.id === controlledMemberId && <span className="text-[9px] text-blue-300/50">(you)</span>}
                   </div>
-                  <div className="text-[9px]" style={{ color: tier.color }}>Lv{m.level} {tier.title}</div>
+                  {onCouch
+                    ? <div className="text-[9px] text-green-400 font-bold">🛋️ In DOME Meeting</div>
+                    : <div className="text-[9px]" style={{ color: tier.color }}>Lv{m.level} {tier.title}</div>
+                  }
                 </div>
-                <div className={`w-2 h-2 rounded-full shrink-0 ${m.status==='online'?'bg-green-400':'bg-yellow-400'}`}
-                  style={m.status==='online'?{boxShadow:'0 0 5px #69f0ae'}:{}} />
+                <div className={`w-2 h-2 rounded-full shrink-0 ${onCouch ? 'bg-green-300' : m.status==='online'?'bg-green-400':'bg-yellow-400'}`}
+                  style={onCouch ? {boxShadow:'0 0 8px #69f07a'} : m.status==='online'?{boxShadow:'0 0 5px #69f0ae'}:{}} />
               </div>
             );
           })}

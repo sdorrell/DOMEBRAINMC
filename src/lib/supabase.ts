@@ -275,7 +275,10 @@ export interface DBUpdateRequest {
   category: 'feature' | 'bug' | 'improvement' | 'other';
   status: 'open' | 'in_progress' | 'done' | 'declined';
   upvotes: string[];
+  approved_for_dev: boolean;
+  dev_notes: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export async function fetchUpdateRequests(): Promise<DBUpdateRequest[]> {
@@ -542,6 +545,14 @@ export async function unapproveRequest(reqId: string): Promise<void> {
     .update({ approved_for_dev: false, dev_notes: null, status: 'open' })
     .eq('id', reqId);
   if (error) console.error('unapproveRequest:', error);
+}
+
+export async function editUpdateRequest(reqId: string, title: string, description: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('mc_update_requests')
+    .update({ title, description, updated_at: new Date().toISOString() })
+    .eq('id', reqId);
+  if (error) console.error('editUpdateRequest:', error);
 }
 
 export function subscribeToSuggestions(callback: (s: DBSuggestion) => void) {

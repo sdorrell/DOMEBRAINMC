@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 import WorldMap from './components/WorldMap';
 import Dashboard from './components/Dashboard';
+import CalendarView from './components/CalendarView';
 import IdeasBoard from './components/IdeasBoard';
 import BadgesView from './components/BadgesView';
 import Leaderboard from './components/Leaderboard';
@@ -23,7 +24,7 @@ import {
 import type { Zone } from './types';
 import './index.css';
 
-type Tab = 'world' | 'dashboard' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests' | 'admin';
+type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests' | 'admin';
 
 export default function App() {
   const [loggedInId, setLoggedInId] = useState<string | null>(() => {
@@ -301,6 +302,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   const TABS: { id: Tab; label: string; emoji: string; adminOnly?: boolean }[] = [
     { id: 'world', label: 'World', emoji: '🗺️' },
     { id: 'dashboard', label: 'Activity', emoji: '📋' },
+    { id: 'calendar', label: 'Calendar', emoji: '📅' },
     { id: 'projects', label: 'Projects', emoji: '🏗️' },
     { id: 'ideas', label: 'Ideas', emoji: '💡' },
     { id: 'badges', label: 'Badges', emoji: '🎖️' },
@@ -424,6 +426,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           />
         )}
         {tab === 'dashboard' && <Dashboard liveMembers={liveMembers} />}
+        {tab === 'calendar' && <CalendarView />}
         {tab === 'projects' && <ProjectsView />}
         {tab === 'ideas' && <IdeasBoard currentUserId={controlledMemberId} />}
         {tab === 'badges' && <BadgesView />}

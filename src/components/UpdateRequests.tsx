@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS } from '../data/gameData';
 import {
   fetchUpdateRequests, createUpdateRequest, toggleRequestUpvote,
-  subscribeToUpdateRequests, type DBUpdateRequest,
+  editUpdateRequest, subscribeToUpdateRequests, type DBUpdateRequest,
 } from '../lib/supabase';
 
 const CATEGORY_CONFIG = {
@@ -35,6 +35,12 @@ export default function UpdateRequests({ currentUserId }: Props) {
   const [category, setCategory] = useState<DBUpdateRequest['category']>('feature');
   const [submitting, setSubmitting] = useState(false);
 
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
     fetchUpdateRequests().then(data => { setRequests(data); setLoading(false); });
 
@@ -62,6 +68,8 @@ export default function UpdateRequests({ currentUserId }: Props) {
       category,
       status: 'open',
       upvotes: [],
+      approved_for_dev: false,
+      dev_notes: null,
     });
     setTitle('');
     setDescription('');
@@ -75,6 +83,30 @@ export default function UpdateRequests({ currentUserId }: Props) {
   const handleUpvote = async (req: DBUpdateRequest) => {
     const next = await toggleRequestUpvote(req.id, currentUserId, req.upvotes);
     setRequests(prev => prev.map(r => r.id === req.id ? { ...r, upvotes: next } : r));
+  };
+
+  const startEdit = (req: DBUpdateRequest) => {
+    setEditingId(req.id);
+    setEditTitle(req.title);
+    setEditDesc(req.description || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditTitle('');
+    setEditDesc('');
+  };
+
+  const saveEdit = async (req: DBUpdateRequest) => {
+    if (!editTitle.trim()) return;
+    setSaving(true);
+    await editUpdateRequest(req.id, editTitle.trim(), editDesc.trim() || null);
+    setRequests(prev => prev.map(r => r.id === req.id
+      ? { ...r, title: editTitle.trim(), description: editDesc.trim() || null }
+      : r
+    ));
+    cancelEdit();
+    setSaving(false);
   };
 
   const filtered = requests.filter(r => {
@@ -213,35 +245,97 @@ export default function UpdateRequests({ currentUserId }: Props) {
 
               {/* Content */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-start gap-2 flex-wrap mb-1">
-                  <span className="text-white font-semibold text-sm">{req.title}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: `${catCfg.color}22`, color: catCfg.color, border: `1px solid ${catCfg.color}44` }}>
-                    {catCfg.emoji} {catCfg.label}
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: `${statusCfg.color}22`, color: statusCfg.color, border: `1px solid ${statusCfg.color}44` }}>
-                    {statusCfg.label}
-                  </span>
-                </div>
+                {editingId === req.id ? (
+                  /* ── Inline edit mode ── */
+                  <div className="flex flex-col gap-2">
+                    <input
+                      className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(99,102,241,0.4)' }}
+                      value={editTitle}
+                      onChange={e => setEditTitle(e.target.value)}
+                      placeholder="Title (required)"
+                      autoFocus
+                    />
+                    <textarea
+                      className="w-full rounded-lg px-3 py-2 text-sm text-white outline-none resize-none"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(99,102,241,0.4)' }}
+                      rows={3}
+                      value={editDesc}
+                      onChange={e => setEditDesc(e.target.value)}
+                      placeholder="Add more details, context, or clarification..."
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => saveEdit(req)} disabled={!editTitle.trim() || saving}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                        style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+                        {saving ? 'Saving...' : '✓ Save'}
+                      </button>
+                      <button onClick={cancelEdit}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white"
+                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Normal view mode ── */
+                  <>
+                    <div className="flex items-start gap-2 flex-wrap mb-1">
+                      <span className="text-white font-semibold text-sm">{req.title}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                        style={{ background: `${catCfg.color}22`, color: catCfg.color, border: `1px solid ${catCfg.color}44` }}>
+                        {catCfg.emoji} {catCfg.label}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                        style={{ background: `${statusCfg.color}22`, color: statusCfg.color, border: `1px solid ${statusCfg.color}44` }}>
+                        {statusCfg.label}
+                      </span>
+                      {req.approved_for_dev && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                          style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                          ✅ Approved for dev
+                        </span>
+                      )}
+                    </div>
 
-                {req.description && (
-                  <p className="text-gray-400 text-xs leading-relaxed mb-2">{req.description}</p>
-                )}
+                    {req.description && (
+                      <p className="text-gray-400 text-xs leading-relaxed mb-2">{req.description}</p>
+                    )}
 
-                <div className="flex items-center gap-2 text-[10px] text-gray-600">
-                  <div className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-black"
-                    style={{ background: author?.avatarColor || '#555' }}>{author?.name[0] || '?'}</div>
-                  <span>{author?.name || req.author_id}</span>
-                  <span>·</span>
-                  <span>{new Date(req.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                  {req.upvotes.length > 0 && (
-                    <>
+                    {/* Dev notes (admin commentary) */}
+                    {req.dev_notes && (
+                      <div className="mb-2 px-3 py-2 rounded-lg text-xs"
+                        style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                        <span className="text-indigo-400 font-bold">📝 Dev notes: </span>
+                        <span className="text-gray-300">{req.dev_notes}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 text-[10px] text-gray-600 flex-wrap">
+                      <div className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-black"
+                        style={{ background: author?.avatarColor || '#555' }}>{author?.name[0] || '?'}</div>
+                      <span>{author?.name || req.author_id}</span>
                       <span>·</span>
-                      <span className="text-indigo-400">{req.upvotes.length} upvote{req.upvotes.length !== 1 ? 's' : ''}</span>
-                    </>
-                  )}
-                </div>
+                      <span>{new Date(req.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      {req.upvotes.length > 0 && (
+                        <>
+                          <span>·</span>
+                          <span className="text-indigo-400">{req.upvotes.length} upvote{req.upvotes.length !== 1 ? 's' : ''}</span>
+                        </>
+                      )}
+                      {/* Edit button for own open requests */}
+                      {isOwn && (req.status === 'open' || req.status === 'in_progress') && (
+                        <>
+                          <span>·</span>
+                          <button onClick={() => startEdit(req)}
+                            className="text-indigo-400 hover:text-indigo-300 transition-colors font-semibold">
+                            ✏️ Edit
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           );
