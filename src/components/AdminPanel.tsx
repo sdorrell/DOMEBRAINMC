@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   fetchSuggestions, approveSuggestion, declineSuggestion,
   saveForLaterSuggestion, approveAllPendingSuggestions,
-  fetchUpdateRequests, approveRequestForDev, unapproveRequest, toggleRequestUpvote,
+  fetchUpdateRequests, approveRequestForDev, unapproveRequest, markRequestDone, toggleRequestUpvote,
   subscribeToSuggestions, subscribeToUpdateRequests,
   getConfig, setConfig,
   fetchWorkSummaries, getFlaggedSessions, flagSpamSession, unflagSpamSession,
@@ -160,6 +160,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setApproving(null);
   };
 
+  const handleMarkDone = async (reqId: string) => {
+    setApproving(reqId);
+    await markRequestDone(reqId);
+    setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'done' as const } : r));
+    setApproving(null);
+  };
+
   const handleWorldStatus = async (id: string, status: DBWorldRequest['status']) => {
     setUpdatingWorld(id);
     await updateWorldRequestStatus(id, status);
@@ -191,6 +198,7 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
   const implementedSuggestions = suggestions.filter(s => s.status === 'implemented');
   const openRequests = requests.filter(r => r.status === 'open' || r.status === 'in_progress')
     .sort((a, b) => b.upvotes.length - a.upvotes.length);
+  const doneRequests = requests.filter(r => r.status === 'done');
   const lastRun = suggestions.length > 0
     ? suggestions.reduce((latest, s) => s.created_at > latest ? s.created_at : latest, suggestions[0].created_at)
     : null;
@@ -343,12 +351,43 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
 
             {/* ── Team Requests ── */}
             {activeSection === 'requests' && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
+                {/* Open / in-progress */}
                 {openRequests.length === 0 ? (
-                  <div className="text-center py-10 text-gray-600 text-sm">No open requests from the team yet</div>
+                  <div className="text-center py-10 text-gray-600 text-sm">No open requests — all caught up ✅</div>
                 ) : openRequests.map(r => (
-                  <RequestCard key={r.id} r={r} approving={approving} onApprove={handleApproveRequest} onUnapprove={handleUnapproveRequest} currentUserId={currentUserId} />
+                  <RequestCard key={r.id} r={r} approving={approving}
+                    onApprove={handleApproveRequest}
+                    onUnapprove={handleUnapproveRequest}
+                    onMarkDone={handleMarkDone}
+                    currentUserId={currentUserId} />
                 ))}
+
+                {/* Done requests */}
+                {doneRequests.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-bold text-green-400/60 uppercase tracking-widest mt-2 flex items-center gap-2">
+                      <span>✅ Implemented ({doneRequests.length})</span>
+                      <div className="flex-1 h-px" style={{ background: 'rgba(74,222,128,0.15)' }} />
+                    </div>
+                    {doneRequests.map(r => (
+                      <div key={r.id} className="p-3 rounded-xl flex items-start gap-3"
+                        style={{ background: 'rgba(74,222,128,0.04)', border: '1px solid rgba(74,222,128,0.2)', opacity: 0.7 }}>
+                        <div className="text-xl shrink-0">{CATEGORY_EMOJI[r.category] || '💬'}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-white text-sm line-through opacity-60">{r.title}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full text-green-400"
+                              style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)' }}>
+                              ✅ Done
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-gray-600 mt-0.5">{r.author_id} · {new Date(r.created_at).toLocaleDateString()}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -813,11 +852,12 @@ function SavedCard({ s, approving, onApprove, onDecline }: {
   );
 }
 
-function RequestCard({ r, approving, onApprove, onUnapprove, currentUserId }: {
+function RequestCard({ r, approving, onApprove, onUnapprove, onMarkDone, currentUserId }: {
   r: DBUpdateRequest & { approved_for_dev?: boolean };
   approving: string | null;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
+  onMarkDone: (id: string) => void;
   currentUserId: string;
 }) {
   const st = STATUS_STYLE[r.status] || STATUS_STYLE.open;
@@ -865,13 +905,22 @@ function RequestCard({ r, approving, onApprove, onUnapprove, currentUserId }: {
               </button>
             )}
             {isApproved && (
-              <button
-                onClick={() => onUnapprove(r.id)}
-                disabled={!!isLoading}
-                className="px-2.5 py-1 rounded-lg text-[11px] transition-all"
-                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
-                {isLoading ? '...' : '↩ Undo approval'}
-              </button>
+              <>
+                <button
+                  onClick={() => onMarkDone(r.id)}
+                  disabled={!!isLoading}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                  style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
+                  {isLoading ? '...' : '✅ Mark as Done'}
+                </button>
+                <button
+                  onClick={() => onUnapprove(r.id)}
+                  disabled={!!isLoading}
+                  className="px-2.5 py-1 rounded-lg text-[11px] transition-all"
+                  style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
+                  {isLoading ? '...' : '↩ Undo'}
+                </button>
+              </>
             )}
             <span className="text-[10px] text-gray-600">{r.author_id} · {new Date(r.created_at).toLocaleDateString()}</span>
           </div>

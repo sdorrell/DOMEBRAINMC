@@ -547,6 +547,14 @@ export async function unapproveRequest(reqId: string): Promise<void> {
   if (error) console.error('unapproveRequest:', error);
 }
 
+export async function markRequestDone(reqId: string): Promise<void> {
+  const { error } = await supabase
+    .from('mc_update_requests')
+    .update({ status: 'done', updated_at: new Date().toISOString() })
+    .eq('id', reqId);
+  if (error) console.error('markRequestDone:', error);
+}
+
 export async function editUpdateRequest(reqId: string, title: string, description: string | null): Promise<void> {
   const { error } = await supabase
     .from('mc_update_requests')
