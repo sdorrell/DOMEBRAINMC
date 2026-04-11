@@ -57,3 +57,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes xpFloat {
+  0%   { opacity: 0; transform: translateY(4px); }
+  12%  { opacity: 1; transform: translateY(0px); }
+  70%  { opacity: 1; transform: translateY(-18px); }
+  100% { opacity: 0; transform: translateY(-38px); }
+}
+
+@keyframes floatUp {
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-60px); }
+}

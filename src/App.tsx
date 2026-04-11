@@ -171,6 +171,9 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
   const [challengeSentTarget, setChallengeSentTarget] = useState<string | null>(null);
   const channelRef = useRef<ReturnType<typeof subscribeToBattleChallenges> | null>(null);
+  const prevXpRef = useRef<Record<string, number>>({});
+  const xpBubbleIdRef = useRef(0);
+  const [xpBubbles, setXpBubbles] = useState<Array<{ id: number; delta: number; memberId: string }>>([]);
 
   // Live Supabase sync
   const { liveMembers, chatMessages, ready, sendChat, syncCoins } = useSupabaseSync(controlledMemberId);
@@ -203,6 +206,20 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
       channelRef.current?.unsubscribe();
     };
   }, [controlledMemberId]);
+
+  // ─── XP gain detection — fires floating bubbles whenever any member gains XP ─
+  useEffect(() => {
+    liveMembers.forEach(m => {
+      const prev = prevXpRef.current[m.id];
+      if (prev !== undefined && m.xp > prev) {
+        const delta = m.xp - prev;
+        const id = ++xpBubbleIdRef.current;
+        setXpBubbles(curr => [...curr, { id, delta, memberId: m.id }]);
+        setTimeout(() => setXpBubbles(curr => curr.filter(b => b.id !== id)), 2500);
+      }
+      prevXpRef.current[m.id] = m.xp;
+    });
+  }, [liveMembers]);
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -454,6 +471,36 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           <span>{toast.text}</span>
         </div>
       )}
+
+      {/* XP Gain Bubbles — float up whenever any team member earns XP */}
+      {xpBubbles.map((bubble, idx) => {
+        const member = liveMembers.find(m => m.id === bubble.memberId) ?? TEAM_MEMBERS.find(m => m.id === bubble.memberId);
+        const isMe = bubble.memberId === controlledMemberId;
+        return (
+          <div key={bubble.id} style={{
+            position: 'fixed',
+            top: `${60 + idx * 34}px`,
+            right: '12px',
+            zIndex: 90,
+            animation: 'xpFloat 2.5s ease-out forwards',
+            background: isMe ? 'rgba(99,102,241,0.92)' : 'rgba(13,17,23,0.92)',
+            border: `1px solid ${isMe ? 'rgba(165,180,252,0.6)' : 'rgba(255,255,255,0.12)'}`,
+            color: 'white',
+            padding: '4px 12px',
+            borderRadius: '20px',
+            fontSize: '12px',
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            pointerEvents: 'none',
+            boxShadow: isMe ? '0 0 12px rgba(99,102,241,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
+            whiteSpace: 'nowrap',
+          }}>
+            ⚡ {isMe ? 'YOU' : (member ? member.name.split(' ')[0] : bubble.memberId)} +{bubble.delta} XP
+          </div>
+        );
+      })}
     </div>
   );
 }

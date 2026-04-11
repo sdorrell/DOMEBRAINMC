@@ -83,6 +83,42 @@ const HIT_LINES: Record<string, string[]> = {
   ],
 };
 
+// ─── SOUND EFFECTS ────────────────────────────────────────────────────────────
+
+function _soundEnabled(): boolean {
+  try { return localStorage.getItem('dome_battle_sound') !== 'off'; } catch { return true; }
+}
+
+function _tone(freq: number, type: OscillatorType, dur: number, vol = 0.22, delay = 0): void {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+    gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+    gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + delay + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + dur + 0.05);
+    osc.onended = () => { try { ctx.close(); } catch { /* ignore */ } };
+  } catch { /* no AudioContext */ }
+}
+
+function playVictoryFanfare(): void {
+  if (!_soundEnabled()) return;
+  const notes: [number, number][] = [[523, 0], [659, 0.1], [784, 0.2], [1047, 0.35]];
+  notes.forEach(([f, d]) => _tone(f, 'square', 0.4, 0.22, d));
+}
+
+function playDefeatJingle(): void {
+  if (!_soundEnabled()) return;
+  const notes: [number, number][] = [[440, 0], [349, 0.18], [294, 0.36], [220, 0.54]];
+  notes.forEach(([f, d]) => _tone(f, 'sawtooth', 0.32, 0.18, d));
+}
+
 function getLine(key: string, vars: Record<string, string | number>): string {
   const lines = HIT_LINES[key] || ['{a} does something. {dmg} damage.'];
   let line = lines[Math.floor(Math.random() * lines.length)];
@@ -174,6 +210,7 @@ export default function BattleModal({ player, enemy, onComplete, onClose }: Prop
   const playerMaxHP = getBattleMaxHP(player.level);
   const enemyMaxHP = getBattleMaxHP(enemy.level);
   const completedRef = useRef(false); // ← prevents double-fire
+  const [soundOn, setSoundOn] = useState(_soundEnabled);
 
   const [state, setState] = useState<BattleState>({
     phase: 'challenge',
@@ -377,6 +414,12 @@ export default function BattleModal({ player, enemy, onComplete, onClose }: Prop
     }
   }, [state.phase]); // eslint-disable-line
 
+  // Sound effects — plays fanfare on victory, jingle on defeat
+  useEffect(() => {
+    if (state.phase === 'victory') playVictoryFanfare();
+    else if (state.phase === 'defeat') playDefeatJingle();
+  }, [state.phase]); // eslint-disable-line
+
   const handlePlayerAction = (action: BattleAction) => {
     if (state.phase !== 'player_turn') return;
     if (state.playerCoins < action.cost) return;
@@ -475,9 +518,22 @@ export default function BattleModal({ player, enemy, onComplete, onClose }: Prop
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
         <div className="font-black text-white tracking-wider" style={{ fontFamily: 'monospace' }}>⚔️ BATTLE — Turn {state.turn}</div>
-        <div className="text-sm font-medium px-3 py-1 rounded-full"
-          style={{ background: isPlayerTurn ? 'rgba(105,240,174,0.2)' : 'rgba(255,82,82,0.2)', color: isPlayerTurn ? '#69f0ae' : '#ff8a80' }}>
-          {isPlayerTurn ? '🟢 YOUR TURN' : isAnimating ? '⚡ Resolving...' : '🔴 Enemy thinking...'}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              const next = !soundOn;
+              setSoundOn(next);
+              try { localStorage.setItem('dome_battle_sound', next ? 'on' : 'off'); } catch { /* ignore */ }
+            }}
+            title={soundOn ? 'Mute battle sounds' : 'Enable battle sounds'}
+            className="text-lg leading-none transition-opacity"
+            style={{ opacity: soundOn ? 0.9 : 0.35 }}>
+            {soundOn ? '🔊' : '🔇'}
+          </button>
+          <div className="text-sm font-medium px-3 py-1 rounded-full"
+            style={{ background: isPlayerTurn ? 'rgba(105,240,174,0.2)' : 'rgba(255,82,82,0.2)', color: isPlayerTurn ? '#69f0ae' : '#ff8a80' }}>
+            {isPlayerTurn ? '🟢 YOUR TURN' : isAnimating ? '⚡ Resolving...' : '🔴 Enemy thinking...'}
+          </div>
         </div>
       </div>
 
