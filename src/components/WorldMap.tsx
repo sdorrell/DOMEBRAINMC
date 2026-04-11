@@ -286,80 +286,168 @@ function drawColumn(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1
   });
 }
 
-/** Iconic Green Couch (DOME Meeting spot) */
+/** Iconic Green Couch (DOME Meeting spot) — isometric 3-face rendering */
 function drawCouch(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1, tick=0) {
   const s = scale;
-  const glow = 0.55 + 0.1 * Math.sin(tick * 0.04);
 
-  // Soft green ambient glow
-  const grad = ctx.createRadialGradient(x, y-8*s, 2*s, x, y-8*s, 28*s);
-  grad.addColorStop(0, `rgba(46,125,50,${glow * 0.55})`);
-  grad.addColorStop(1, 'rgba(46,125,50,0)');
-  ctx.fillStyle = grad;
+  // ── Colour palette ─────────────────────────────────────────────────────────
+  const TOP    = '#43a047'; // top faces  (lightest)
+  const FRONT  = '#2e7d32'; // front faces (mid)
+  const SIDE   = '#1b5e20'; // side faces  (dark)
+  const SHADOW = '#0a2e0a'; // deep shadow / dividers
+  const FABRIC = '#66bb6a'; // subtle highlight on cushion surface
+  const WOOD   = '#4e342e'; // legs
+
+  // ── Layout dimensions ──────────────────────────────────────────────────────
+  const W    = 32 * s;  // total couch width
+  const aW   = 5  * s;  // armrest width
+  const iW   = W - aW*2; // inner seat width (between armrests)
+  const legH = 4  * s;  // leg height below seat base
+  const sH   = 7  * s;  // seat front-face height
+  const backH = 18 * s; // back-rest front-face height
+  const armH  = 10 * s; // armrest height above seat top
+  // Isometric "depth" offset: gives every horizontal surface a parallelogram top-face
+  const dx = 5  * s;   // screen-x shift for depth
+  const dy = 2.5* s;   // screen-y shift for depth
+
+  // Anchor: x = horizontal center, y = ground level (bottom of legs)
+  const legBot  = y;
+  const seatBot = legBot  - legH;
+  const seatTop = seatBot - sH;
+  const armTop  = seatTop - armH;
+  const backTop = seatTop - backH;
+  const L       = x - W/2;   // left edge
+  const R       = x + W/2;   // right edge
+  const iL      = L + aW;    // inner-left
+  const iR      = R - aW;    // inner-right
+
+  // Helper: draw a face as a parallelogram (offset top-left by dx,dy)
+  const para = (lx: number, ty: number, w: number, h: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(lx,    ty);
+    ctx.lineTo(lx-dx, ty+dy);
+    ctx.lineTo(lx-dx, ty+dy+h);
+    ctx.lineTo(lx,    ty+h);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  // Helper: horizontal top face as parallelogram (given bottom-left corner)
+  const topFace = (lx: number, bY: number, w: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(lx,    bY);
+    ctx.lineTo(lx-dx, bY+dy);
+    ctx.lineTo(lx-dx+w, bY+dy);
+    ctx.lineTo(lx+w, bY);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  // ── Subtle ground glow ─────────────────────────────────────────────────────
+  const glowA = 0.18 + 0.05 * Math.sin(tick * 0.05);
+  const grd = ctx.createRadialGradient(x-dx/2, seatBot+dy/2, 2, x-dx/2, seatBot+dy/2, 24*s);
+  grd.addColorStop(0, `rgba(76,175,80,${glowA})`);
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
   ctx.beginPath();
-  ctx.ellipse(x, y-8*s, 28*s, 16*s, 0, 0, Math.PI*2);
+  ctx.ellipse(x-dx/2, seatBot+dy/2, 24*s, 8*s, 0, 0, Math.PI*2);
   ctx.fill();
 
-  // Couch body (sectional — draw as two cushion blocks)
-  const couchW = 28*s, couchH = 14*s, couchY = y-8*s;
+  // ══ BACK REST — drawn first (furthest back) ════════════════════════════════
 
-  // Back rest
-  ctx.fillStyle = '#1b5e20';
-  ctx.beginPath();
-  ctx.roundRect(x - couchW/2, couchY - couchH*0.85, couchW, couchH*0.45, 4*s);
-  ctx.fill();
+  // Left side face (shadow parallelogram — only visible on left armrest edge)
+  para(L, backTop, aW, backH + sH + legH, SHADOW);
 
-  // Seat cushions — left
-  ctx.fillStyle = '#2e7d32';
+  // Back-rest front face — two cushions with divider
+  ctx.fillStyle = SIDE;
+  ctx.fillRect(L, backTop, W, backH);
+  // Cushion highlights
+  ctx.fillStyle = FABRIC; ctx.globalAlpha = 0.1;
+  ctx.fillRect(L+2*s, backTop+2*s, iW/2-4*s, backH-4*s);
+  ctx.fillRect(x+2*s, backTop+2*s, iW/2-4*s, backH-4*s);
+  ctx.globalAlpha = 1;
+  // Cushion seam (vertical divider)
+  ctx.fillStyle = SHADOW;
+  ctx.fillRect(x-1.5*s, backTop+2*s, 3*s, backH-4*s);
+
+  // Back-rest top face
+  topFace(L, backTop, W, FRONT);
+  // Thin highlight line along top edge
+  ctx.save(); ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = TOP; ctx.lineWidth = 1.5*s;
+  ctx.beginPath(); ctx.moveTo(L, backTop); ctx.lineTo(R, backTop); ctx.stroke();
+  ctx.restore();
+
+  // ══ ARMRESTS ══════════════════════════════════════════════════════════════
+
+  // Left armrest — side face + front face + top face
+  para(L, armTop, aW, armH+sH+legH, SHADOW);
+  ctx.fillStyle = SIDE;
+  ctx.fillRect(L, armTop, aW, armH+sH+legH);
+  topFace(L, armTop, aW, TOP);
+
+  // Right armrest — front face + top face (no visible side face)
+  ctx.fillStyle = SIDE;
+  ctx.fillRect(iR, armTop, aW, armH+sH+legH);
+  topFace(iR, armTop, aW, TOP);
+
+  // ══ SEAT ══════════════════════════════════════════════════════════════════
+
+  // Seat left side face
+  para(iL, seatTop, 1*s, sH, SHADOW);
+
+  // Seat front face — two cushions
+  ctx.fillStyle = FRONT;
+  ctx.fillRect(iL, seatTop, iW/2, sH);
+  ctx.fillRect(iL+iW/2, seatTop, iW/2, sH);
+  // Cushion seam
+  ctx.fillStyle = SHADOW;
+  ctx.fillRect(x-1*s, seatTop+1*s, 2*s, sH-2*s);
+  // Cushion bevel highlights
+  ctx.fillStyle = TOP; ctx.globalAlpha = 0.15;
+  ctx.fillRect(iL+2*s, seatTop+1*s, iW/2-6*s, 2*s);
+  ctx.fillRect(x+3*s, seatTop+1*s, iW/2-6*s, 2*s);
+  ctx.globalAlpha = 1;
+
+  // Seat top face (visible from above — lightest surface)
+  topFace(iL, seatTop, iW, TOP);
+  // Cushion seam continues on top face
+  ctx.strokeStyle = FRONT; ctx.lineWidth = 0.8*s;
   ctx.beginPath();
-  ctx.roundRect(x - couchW/2, couchY - couchH*0.45, couchW*0.46, couchH*0.5, 3*s);
-  ctx.fill();
-  // divider line on left cushion
-  ctx.strokeStyle = '#1b5e20';
-  ctx.lineWidth = 1*s;
-  ctx.beginPath();
-  ctx.moveTo(x - couchW*0.04, couchY - couchH*0.45);
-  ctx.lineTo(x - couchW*0.04, couchY + couchH*0.05);
+  ctx.moveTo(x, seatTop);
+  ctx.lineTo(x-dx, seatTop+dy);
   ctx.stroke();
 
-  // Seat cushions — right
-  ctx.fillStyle = '#388e3c';
-  ctx.beginPath();
-  ctx.roundRect(x - couchW/2 + couchW*0.54, couchY - couchH*0.45, couchW*0.46, couchH*0.5, 3*s);
-  ctx.fill();
+  // ══ LEGS ══════════════════════════════════════════════════════════════════
 
-  // Armrests
-  ctx.fillStyle = '#1a4d1a';
-  // left arm
-  ctx.beginPath();
-  ctx.roundRect(x - couchW/2 - 4*s, couchY - couchH*0.5, 5*s, couchH*0.6, 2*s);
-  ctx.fill();
-  // right arm
-  ctx.beginPath();
-  ctx.roundRect(x + couchW/2 - 1*s, couchY - couchH*0.5, 5*s, couchH*0.6, 2*s);
-  ctx.fill();
+  // Front two legs
+  ctx.fillStyle = WOOD;
+  ctx.fillRect(iL+2*s, seatBot, 3*s, legH);
+  ctx.fillRect(iR-5*s, seatBot, 3*s, legH);
+  // Leg side faces (darker)
+  ctx.fillStyle = '#2d1a17';
+  para(iL+2*s, seatBot, 1*s, legH, '#2d1a17');
+  para(iR-5*s, seatBot, 1*s, legH, '#2d1a17');
 
-  // Legs (4 tiny squares)
-  ctx.fillStyle = '#0a3a0a';
-  [[-couchW/2+3*s, 3*s], [-couchW/2+3*s + couchW*0.4, 3*s],
-   [couchW/2-6*s, 3*s], [couchW/2-6*s - couchW*0.4, 3*s]].forEach(([dx, dy]) => {
-    ctx.fillRect(x + (dx as number), couchY + (dy as number), 3*s, 4*s);
-  });
+  // ══ DOME MEETING LABEL ════════════════════════════════════════════════════
 
-  // "DOME MEETING" label tag — pulsing
   ctx.save();
-  ctx.globalAlpha = 0.7 + 0.15 * Math.sin(tick * 0.06);
-  ctx.font = `bold ${Math.round(7*s)}px sans-serif`;
+  ctx.globalAlpha = 0.88 + 0.08 * Math.sin(tick * 0.05);
+  const lbl = '🛋️ DOME MEETING';
+  ctx.font = `bold ${Math.round(7.5*s)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const tagW = 54*s, tagH = 10*s;
-  const tagX = x - tagW/2, tagY = couchY - couchH - 12*s;
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  const lw = ctx.measureText(lbl).width;
+  const pad = 5*s, tH = 12*s;
+  const tY = armTop - 13*s;
+  ctx.fillStyle = 'rgba(0,0,0,0.82)';
   ctx.beginPath();
-  ctx.roundRect(tagX, tagY, tagW, tagH, 3*s);
+  ctx.roundRect(x - lw/2 - pad, tY, lw + pad*2, tH, 3*s);
   ctx.fill();
-  ctx.fillStyle = '#69f07a';
-  ctx.fillText('🛋️ DOME MEETING', x, tagY + tagH/2);
+  ctx.fillStyle = '#a5f3a7';
+  ctx.fillText(lbl, x, tY + tH/2);
   ctx.restore();
 }
 
