@@ -12,7 +12,7 @@ import UpdateRequests from './components/UpdateRequests';
 import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
-import { TEAM_MEMBERS, getLevelTier } from './data/gameData';
+import { TEAM_MEMBERS, getLevelTier, ZONES } from './data/gameData';
 import {
   sendBattleChallenge,
   fetchPendingChallenges,
@@ -20,8 +20,9 @@ import {
   respondToChallenge,
   completeBattleChallenge,
   type DBBattleChallenge,
+  logMeetingSession,
 } from './lib/supabase';
-import type { Zone } from './types';
+import type { Zone, TeamMember } from './types';
 import './index.css';
 
 type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests' | 'admin';
@@ -158,6 +159,147 @@ function ChallengeSentBanner({ targetName, onDismiss }: { targetName: string; on
   );
 }
 
+// ─── DOME Meeting Modal ────────────────────────────────────────────────────────
+
+function DomeMeetingModal({
+  me,
+  liveMembers,
+  onSendChat,
+  onClose,
+}: {
+  me: TeamMember;
+  liveMembers: TeamMember[];
+  onSendChat: (text: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [notes, setNotes] = useState('');
+  const [nextSteps, setNextSteps] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [announced, setAnnounced] = useState(false);
+
+  // Figure out who is currently in the green_couch zone
+  const couchZone = ZONES.find(z => z.id === 'green_couch');
+  const couchTileKeys = new Set(couchZone?.tiles.map(t => `${t.x},${t.y}`) ?? []);
+
+  const attendees = liveMembers.filter(m => {
+    // liveMembers may carry worldX/worldY from DB player state
+    const key = `${m.worldX},${m.worldY}`;
+    return couchTileKeys.has(key);
+  });
+
+  const handleAnnounce = async () => {
+    const names = attendees.length > 0
+      ? attendees.map(m => m.name).join(', ')
+      : me.name;
+    await onSendChat(`🛋️ DOME Meeting started! Attendees: ${names}`);
+    setAnnounced(true);
+  };
+
+  const handleLogNotes = async () => {
+    if (!notes.trim()) return;
+    setSaving(true);
+    await logMeetingSession(me.name, notes.trim(), nextSteps.trim() || null, []);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    setNotes('');
+    setNextSteps('');
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relative rounded-2xl p-6 flex flex-col gap-5 w-full max-w-lg"
+        style={{
+          background: 'linear-gradient(135deg, rgba(10,40,10,0.98), rgba(5,25,5,0.98))',
+          border: '2px solid rgba(67,160,71,0.4)',
+          boxShadow: '0 0 60px rgba(67,160,71,0.25), inset 0 0 0 1px rgba(255,255,255,0.04)',
+        }}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🛋️</span>
+              <span className="text-xl font-black text-white">DOME Meeting</span>
+            </div>
+            <div className="text-xs text-green-400/70 mt-0.5">The legendary green couch — where decisions are made</div>
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:text-white transition-colors"
+            style={{ background: 'rgba(255,255,255,0.06)' }}>✕</button>
+        </div>
+
+        {/* Attendees */}
+        <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(67,160,71,0.2)' }}>
+          <div className="text-[10px] font-bold text-green-500/70 uppercase tracking-widest mb-3">On The Couch</div>
+          {attendees.length === 0 ? (
+            <div className="text-gray-500 text-xs">Walk to the 🛋️ zone to show up here. Only you right now.</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {attendees.map(m => (
+                <div key={m.id} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+                  style={{ background: `${m.avatarColor}15`, border: `1px solid ${m.avatarColor}33` }}>
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-black"
+                    style={{ background: m.avatarColor }}>{m.name[0]}</div>
+                  <span className="text-xs font-bold" style={{ color: m.avatarColor }}>{m.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Announce button */}
+        <button
+          onClick={handleAnnounce}
+          disabled={announced}
+          className="w-full py-2.5 rounded-xl font-black text-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          style={{
+            background: announced ? 'rgba(34,197,94,0.15)' : 'linear-gradient(135deg, #2e7d32, #1b5e20)',
+            border: `1px solid ${announced ? 'rgba(34,197,94,0.4)' : 'rgba(67,160,71,0.5)'}`,
+            color: announced ? '#4ade80' : 'white',
+            boxShadow: announced ? 'none' : '0 0 20px rgba(46,125,50,0.4)',
+          }}>
+          {announced ? '✅ Meeting Announced in Chat' : '📢 Announce Meeting in Chat'}
+        </button>
+
+        {/* Log meeting notes */}
+        <div className="flex flex-col gap-3">
+          <div className="text-[10px] font-bold text-green-500/70 uppercase tracking-widest">Log Meeting Notes to DOME Brain</div>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="What was discussed? Key decisions made..."
+            rows={3}
+            className="w-full rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none outline-none focus:ring-1 focus:ring-green-500/50"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+          />
+          <input
+            value={nextSteps}
+            onChange={e => setNextSteps(e.target.value)}
+            placeholder="Next steps / action items..."
+            className="w-full rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:ring-1 focus:ring-green-500/50"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+          />
+          <button
+            onClick={handleLogNotes}
+            disabled={!notes.trim() || saving}
+            className="w-full py-2.5 rounded-xl font-black text-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            style={{
+              background: saved ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.25)',
+              border: '1px solid rgba(99,102,241,0.4)',
+              color: saved ? '#a5b4fc' : 'white',
+            }}>
+            {saving ? '⏳ Saving...' : saved ? '✅ Logged to DOME Brain!' : '🧠 Log Notes to DOME Brain'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
 function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string; onLogout: () => void }) {
@@ -230,6 +372,16 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   }, []);
 
   const handleZoneEnter = (zone: Zone) => setActiveZone(zone);
+
+  // ─── Zone action (E key / button) ────────────────────────────────────────────
+  const [domeMeetingOpen, setDomeMeetingOpen] = useState(false);
+
+  const handleZoneAction = (zone: Zone) => {
+    if (zone.id === 'green_couch') {
+      setDomeMeetingOpen(true);
+    }
+    // Other zones can be wired up here as needed
+  };
 
   const handleSendChat = async (text: string) => {
     await sendChat(text);
@@ -418,6 +570,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           <WorldMap
             controlledMemberId={controlledMemberId}
             onZoneEnter={handleZoneEnter}
+            onZoneAction={handleZoneAction}
             onChallenge={handleChallenge}
             chatMessages={chatMessages}
             onSendChat={handleSendChat}
@@ -463,6 +616,16 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
             setBattleTargetId(null);
             setActiveChallengeId(null);
           }}
+        />
+      )}
+
+      {/* ── DOME Meeting Modal (Green Couch) ── */}
+      {domeMeetingOpen && (
+        <DomeMeetingModal
+          me={me}
+          liveMembers={liveMembers}
+          onSendChat={handleSendChat}
+          onClose={() => setDomeMeetingOpen(false)}
         />
       )}
 

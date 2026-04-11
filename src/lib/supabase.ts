@@ -256,6 +256,20 @@ export async function fetchWorkSummaries(limit = 30): Promise<DBWorkSummary[]> {
   return data || [];
 }
 
+export async function logMeetingSession(teamMember: string, summary: string, nextSteps: string | null, tags: string[]): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { error } = await supabase.from('dome_work_summaries').insert({
+    team_member: teamMember,
+    project_name: 'DOME Team Meeting',
+    session_date: today,
+    summary,
+    key_decisions: null,
+    next_steps: nextSteps || null,
+    tags: ['meeting', ...tags],
+  });
+  if (error) console.error('logMeetingSession:', error);
+}
+
 export async function fetchProjectContexts(): Promise<DBProjectContext[]> {
   const { data, error } = await supabase
     .from('dome_project_context')

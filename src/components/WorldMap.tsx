@@ -705,6 +705,7 @@ interface PlayerState {
 interface WorldMapProps {
   controlledMemberId: string;
   onZoneEnter?: (zone: Zone) => void;
+  onZoneAction?: (zone: Zone) => void;
   onChallenge?: (targetId: string) => void;
   chatMessages: { id: string; authorId: string; text: string; createdAt: number }[];
   onSendChat: (text: string) => void;
@@ -714,7 +715,7 @@ interface WorldMapProps {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge, chatMessages, onSendChat, playerCoins, liveMembers }: WorldMapProps) {
+export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction, onChallenge, chatMessages, onSendChat, playerCoins, liveMembers }: WorldMapProps) {
   // Use liveMembers if provided, otherwise fall back to static TEAM_MEMBERS
   const members = liveMembers && liveMembers.length > 0 ? liveMembers : TEAM_MEMBERS;
 
@@ -733,6 +734,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
 
   const camRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
   const statesRef = useRef<Record<string, PlayerState>>({});
+  const currentZoneRef = useRef<Zone | null>(null);
 
   const [playerStates, setPlayerStates] = useState<Record<string, PlayerState>>(() => {
     const init = Object.fromEntries(members.map(m => [m.id, {
@@ -776,6 +778,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
       const ns = { ...s, x:nx, y:ny, dir, moving:true, frame:(s.frame+1)%8 };
       const zone = ZONE_TILE_SET[`${nx},${ny}`] || null;
       setCurrentZone(zone);
+      currentZoneRef.current = zone;
       if (zone && onZoneEnter) onZoneEnter(zone);
       updateCamera(nx, ny);
 
@@ -795,7 +798,12 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
   useEffect(() => {
     const KEYS = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'];
     const dn = (e: KeyboardEvent) => {
-      if (KEYS.includes(e.key.toLowerCase())) { e.preventDefault(); keysRef.current.add(e.key.toLowerCase()); }
+      const k = e.key.toLowerCase();
+      if (KEYS.includes(k)) { e.preventDefault(); keysRef.current.add(k); }
+      if (k === 'e') {
+        const zone = currentZoneRef.current;
+        if (zone && zone.action && onZoneAction) onZoneAction(zone);
+      }
     };
     const up = (e: KeyboardEvent) => {
       keysRef.current.delete(e.key.toLowerCase());
@@ -806,7 +814,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
     window.addEventListener('keydown', dn);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
-  }, [controlledMemberId]);
+  }, [controlledMemberId, onZoneAction]);
 
   // Init camera
   useEffect(() => {
@@ -1073,14 +1081,17 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
           {currentZone && (() => {
             const b = BIOME[currentZone.id] || BIOME.grind_zone;
             return (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm font-bold text-white flex items-center gap-2 pointer-events-none"
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm font-bold text-white flex items-center gap-2"
                 style={{ background:'rgba(0,0,0,0.8)', border:`2px solid ${b.topHL}88`, boxShadow:`0 0 16px ${b.topHL}44`, backdropFilter:'blur(6px)' }}>
                 <span className="text-lg">{currentZone.emoji}</span>
                 <span>{currentZone.name}</span>
                 {currentZone.action && (
-                  <kbd className="px-2 py-0.5 rounded text-xs font-bold" style={{ background: b.topHL+'33', border:`1px solid ${b.topHL}66`, color: b.topHL }}>
+                  <button
+                    onClick={() => onZoneAction && onZoneAction(currentZone)}
+                    className="px-2 py-0.5 rounded text-xs font-bold transition-all hover:scale-105 active:scale-95"
+                    style={{ background: b.topHL+'33', border:`1px solid ${b.topHL}66`, color: b.topHL, cursor: 'pointer' }}>
                     [E] {currentZone.action}
-                  </kbd>
+                  </button>
                 )}
               </div>
             );
