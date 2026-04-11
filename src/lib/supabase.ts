@@ -414,6 +414,120 @@ export async function unflagSpamSession(sessionId: string, memberId: string): Pr
   await addXp(memberId, 250, '✅ XP farming flag reversed by admin');
 }
 
+// ─── World Requests ────────────────────────────────────────────────────────
+
+export interface DBWorldRequest {
+  id: string;
+  author_id: string;
+  title: string;
+  description: string | null;
+  category: 'new_zone' | 'decoration' | 'event' | 'rule_change' | 'other';
+  status: 'open' | 'approved' | 'declined' | 'implemented';
+  upvotes: string[];
+  created_at: string;
+}
+
+export async function fetchWorldRequests(): Promise<DBWorldRequest[]> {
+  const { data, error } = await supabase
+    .from('mc_world_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchWorldRequests:', error); return []; }
+  return data || [];
+}
+
+export async function createWorldRequest(req: Omit<DBWorldRequest, 'id' | 'created_at'>): Promise<void> {
+  const { error } = await supabase.from('mc_world_requests').insert(req);
+  if (error) console.error('createWorldRequest:', error);
+}
+
+export async function updateWorldRequestStatus(id: string, status: DBWorldRequest['status']): Promise<void> {
+  const { error } = await supabase
+    .from('mc_world_requests')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) console.error('updateWorldRequestStatus:', error);
+}
+
+export async function toggleWorldRequestUpvote(id: string, memberId: string, current: string[]): Promise<string[]> {
+  const next = current.includes(memberId)
+    ? current.filter(x => x !== memberId)
+    : [...current, memberId];
+  await supabase.from('mc_world_requests').update({ upvotes: next }).eq('id', id);
+  return next;
+}
+
+// ─── Battle Challenges ─────────────────────────────────────────────────────
+
+export interface DBBattleChallenge {
+  id: string;
+  challenger_id: string;
+  defender_id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'expired' | 'completed';
+  winner_id: string | null;
+  coins_transferred: number;
+  expires_at: string;
+  created_at: string;
+}
+
+export async function sendBattleChallenge(challengerId: string, defenderId: string): Promise<DBBattleChallenge | null> {
+  // Expire old pending challenges between the same two players first
+  await supabase
+    .from('mc_battle_challenges')
+    .update({ status: 'expired' })
+    .eq('challenger_id', challengerId)
+    .eq('defender_id', defenderId)
+    .eq('status', 'pending');
+
+  const { data, error } = await supabase
+    .from('mc_battle_challenges')
+    .insert({ challenger_id: challengerId, defender_id: defenderId })
+    .select()
+    .single();
+  if (error) { console.error('sendBattleChallenge:', error); return null; }
+  return data;
+}
+
+export async function fetchPendingChallenges(memberId: string): Promise<DBBattleChallenge[]> {
+  const { data, error } = await supabase
+    .from('mc_battle_challenges')
+    .select('*')
+    .eq('defender_id', memberId)
+    .eq('status', 'pending')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchPendingChallenges:', error); return []; }
+  return data || [];
+}
+
+export async function respondToChallenge(id: string, accept: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('mc_battle_challenges')
+    .update({ status: accept ? 'accepted' : 'declined', updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) console.error('respondToChallenge:', error);
+}
+
+export async function completeBattleChallenge(id: string, winnerId: string, coinsTransferred: number): Promise<void> {
+  const { error } = await supabase
+    .from('mc_battle_challenges')
+    .update({ status: 'completed', winner_id: winnerId, coins_transferred: coinsTransferred, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) console.error('completeBattleChallenge:', error);
+}
+
+export function subscribeToBattleChallenges(defenderId: string, callback: (c: DBBattleChallenge) => void) {
+  return supabase
+    .channel('mc_challenges_' + defenderId)
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'mc_battle_challenges',
+      filter: `defender_id=eq.${defenderId}`,
+    }, payload => callback(payload.new as DBBattleChallenge))
+    .subscribe();
+}
+
 export async function approveRequestForDev(reqId: string, notes?: string): Promise<void> {
   const { error } = await supabase
     .from('mc_update_requests')

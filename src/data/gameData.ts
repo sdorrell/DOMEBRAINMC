@@ -495,6 +495,26 @@ export const TEAM_MEMBERS: TeamMember[] = [
     lastActive: '45 mins ago',
     joinedDate: '2024-01-01',
   },
+  {
+    id: 'devin',
+    name: 'Devin',
+    role: 'Telephony & Engineering',
+    avatarColor: '#8b5cf6',
+    avatarAccent: '#c4b5fd',
+    level: 8,
+    xp: 1200,
+    xpToNext: 1750,
+    coins: 155,
+    battleWins: 0,
+    battleLosses: 0,
+    badges: ['pioneer', 'first_steps'],
+    activeBadges: [],
+    worldX: 22,
+    worldY: 12,
+    status: 'online',
+    lastActive: 'just now',
+    joinedDate: '2026-04-10',
+  },
 ];
 
 // ─── IDEAS BOARD ──────────────────────────────────────────────────────────────
@@ -721,6 +741,9 @@ export const BASE_BATTLE_ACTIONS: BattleAction[] = [
   { id: 'power',   name: 'Power Blow',    emoji: '💥',  cost: 15, damageMin: 22, damageMax: 34, description: 'Spend coins for real damage.' },
   { id: 'shield',  name: 'Shield Up',     emoji: '🛡️',  cost: 0,  damageMin: 0,  damageMax: 0,  shieldTurns: 1, description: 'Block 65% of the next hit. Free.' },
   { id: 'potion',  name: 'Coin Potion',   emoji: '🧪',  cost: 30, damageMin: 0,  damageMax: 0,  healAmount: 28, description: 'Restore 28 HP. Crucial when desperate.' },
+  { id: 'torch',   name: 'Torch It',      emoji: '🔥',  cost: 20, damageMin: 12, damageMax: 18, burnTurns: 3,   description: 'Lights them on fire. 8 burn damage per turn for 3 turns.' },
+  { id: 'freeze',  name: 'Ice Block',     emoji: '❄️',  cost: 25, damageMin: 6,  damageMax: 10, freezeTurns: 1, description: 'Freezes the enemy — they skip their next turn.' },
+  { id: 'boost',   name: 'Hyperfocus',    emoji: '⚡',  cost: 20, damageMin: 0,  damageMax: 0,  boostSelf: 2,   description: 'Enter hyperfocus mode. +60% damage for 2 turns.' },
 ];
 
 // Role-specific ultimate moves
@@ -759,6 +782,11 @@ export const ULTIMATES: Record<string, BattleAction> = {
     id: 'ult', name: 'Cease & Desist', emoji: '⚖️', cost: 50, isUltimate: true,
     damageMin: 44, damageMax: 60,
     description: 'Legally obligated to destroy you. Irresistible force.',
+  },
+  'Telephony & Engineering': {
+    id: 'ult', name: 'Line Drop', emoji: '☎️', cost: 50, isUltimate: true,
+    damageMin: 40, damageMax: 52, freezeTurns: 1,
+    description: 'Cuts the enemy\'s line mid-sentence AND freezes them. Brutal.',
   },
 };
 

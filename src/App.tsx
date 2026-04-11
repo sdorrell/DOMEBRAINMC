@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 import WorldMap from './components/WorldMap';
 import Dashboard from './components/Dashboard';
@@ -12,6 +12,14 @@ import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
 import { TEAM_MEMBERS, getLevelTier } from './data/gameData';
+import {
+  sendBattleChallenge,
+  fetchPendingChallenges,
+  subscribeToBattleChallenges,
+  respondToChallenge,
+  completeBattleChallenge,
+  type DBBattleChallenge,
+} from './lib/supabase';
 import type { Zone } from './types';
 import './index.css';
 
@@ -37,6 +45,118 @@ export default function App() {
   }} />;
 }
 
+// ─── Challenge Notification Overlay ───────────────────────────────────────────
+
+function ChallengeNotification({
+  challenge,
+  challengerName,
+  onAccept,
+  onDecline,
+}: {
+  challenge: DBBattleChallenge;
+  challengerName: string;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const [timeLeft, setTimeLeft] = useState('');
+
+  useEffect(() => {
+    const update = () => {
+      const diff = new Date(challenge.expires_at).getTime() - Date.now();
+      if (diff <= 0) { setTimeLeft('EXPIRED'); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setTimeLeft(`${h}h ${m}m ${s}s`);
+    };
+    update();
+    const iv = setInterval(update, 1000);
+    return () => clearInterval(iv);
+  }, [challenge.expires_at]);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+      {/* Animated glow ring */}
+      <div className="relative flex flex-col items-center gap-5 p-8 rounded-2xl max-w-sm w-full"
+        style={{
+          background: 'linear-gradient(135deg, #0d1117 0%, #1a0a2e 100%)',
+          border: '2px solid rgba(239,68,68,0.7)',
+          boxShadow: '0 0 60px rgba(239,68,68,0.4), 0 0 120px rgba(239,68,68,0.15)',
+        }}>
+        {/* Pulse ring */}
+        <div className="absolute inset-0 rounded-2xl animate-ping"
+          style={{ border: '2px solid rgba(239,68,68,0.3)', animationDuration: '1.5s' }} />
+
+        <div className="text-5xl animate-bounce">⚔️</div>
+        <div className="text-center">
+          <div className="text-white font-black text-xl mb-1">YOU'VE BEEN CHALLENGED</div>
+          <div className="text-red-400 font-bold text-lg">{challengerName} wants to fight!</div>
+        </div>
+
+        {/* Timer */}
+        <div className="flex items-center gap-2 px-4 py-2 rounded-xl"
+          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+          <span className="text-red-400 text-sm">⏱</span>
+          <span className="text-red-300 font-mono font-bold text-sm">
+            {timeLeft === 'EXPIRED' ? '⚠️ EXPIRED' : `Expires in ${timeLeft}`}
+          </span>
+        </div>
+
+        <div className="text-gray-400 text-xs text-center leading-relaxed">
+          Accept to jump straight into battle.<br />
+          Decline to avoid the fight (coward 🐔).
+        </div>
+
+        {/* Buttons */}
+        <div className="flex gap-3 w-full">
+          <button onClick={onDecline}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all hover:scale-105"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: '#9ca3af' }}>
+            😤 Decline
+          </button>
+          <button onClick={onAccept}
+            className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all hover:scale-105"
+            style={{
+              background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+              boxShadow: '0 0 20px rgba(239,68,68,0.5)',
+              color: 'white',
+              border: 'none',
+            }}>
+            ⚔️ FIGHT!
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Challenge Sent Banner ─────────────────────────────────────────────────────
+
+function ChallengeSentBanner({ targetName, onDismiss }: { targetName: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-5 py-3 rounded-xl flex items-center gap-3 text-sm font-medium"
+      style={{
+        background: 'rgba(0,0,0,0.95)',
+        border: '1px solid rgba(239,68,68,0.6)',
+        boxShadow: '0 0 24px rgba(239,68,68,0.3)',
+        color: 'white',
+      }}>
+      <span className="text-xl">⚔️</span>
+      <div>
+        <div className="font-black">Challenge Sent!</div>
+        <div className="text-gray-400 text-xs">{targetName} has 24 hours to accept.</div>
+      </div>
+      <button onClick={onDismiss} className="ml-2 text-gray-500 hover:text-gray-300 text-lg leading-none">×</button>
+    </div>
+  );
+}
+
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
 function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string; onLogout: () => void }) {
@@ -45,6 +165,12 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   const [toast, setToast] = useState<{ text: string; emoji: string; color?: string } | null>(null);
   const [pulseTab, setPulseTab] = useState<Tab | null>(null);
   const [battleTargetId, setBattleTargetId] = useState<string | null>(null);
+
+  // Challenge system state
+  const [pendingChallenges, setPendingChallenges] = useState<DBBattleChallenge[]>([]);
+  const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+  const [challengeSentTarget, setChallengeSentTarget] = useState<string | null>(null);
+  const channelRef = useRef<ReturnType<typeof subscribeToBattleChallenges> | null>(null);
 
   // Live Supabase sync
   const { liveMembers, chatMessages, ready, sendChat, syncCoins } = useSupabaseSync(controlledMemberId);
@@ -57,27 +183,85 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   // Local coin state (optimistic, synced to DB after battle)
   const [playerCoins, setPlayerCoins] = useState<number>(me.coins);
 
-  const showToast = (text: string, emoji: string, color?: string) => {
+  // ─── Load & subscribe to incoming challenges ─────────────────────────────────
+  useEffect(() => {
+    // Load existing pending challenges on mount
+    fetchPendingChallenges(controlledMemberId).then(challenges => {
+      if (challenges.length > 0) setPendingChallenges(challenges);
+    });
+
+    // Subscribe to new challenges in realtime
+    channelRef.current = subscribeToBattleChallenges(controlledMemberId, (challenge) => {
+      setPendingChallenges(prev => {
+        // Avoid duplicates
+        if (prev.find(c => c.id === challenge.id)) return prev;
+        return [challenge, ...prev];
+      });
+    });
+
+    return () => {
+      channelRef.current?.unsubscribe();
+    };
+  }, [controlledMemberId]);
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  const showToast = useCallback((text: string, emoji: string, color?: string) => {
     setToast({ text, emoji, color });
     setTimeout(() => setToast(null), 3500);
-  };
+  }, []);
 
   const handleZoneEnter = (zone: Zone) => setActiveZone(zone);
 
   const handleSendChat = async (text: string) => {
     await sendChat(text);
-    // pulse world tab if not on it
     if (tab !== 'world') {
       setPulseTab('world');
       setTimeout(() => setPulseTab(null), 2500);
     }
   };
 
-  const handleChallenge = (targetId: string) => setBattleTargetId(targetId);
+  // ─── Challenge flow ───────────────────────────────────────────────────────────
+
+  const handleChallenge = async (targetId: string) => {
+    const target = liveMembers.find(m => m.id === targetId);
+    const result = await sendBattleChallenge(controlledMemberId, targetId);
+    if (result) {
+      setChallengeSentTarget(target?.name || targetId);
+      await sendChat(`challenged ${target?.name || targetId} to battle ⚔️ — they have 24 hours to accept!`);
+    } else {
+      showToast('Failed to send challenge', '❌', '#ef4444');
+    }
+  };
+
+  const handleAcceptChallenge = async (challenge: DBBattleChallenge) => {
+    await respondToChallenge(challenge.id, true);
+    setActiveChallengeId(challenge.id);
+    setBattleTargetId(challenge.challenger_id);
+    setPendingChallenges(prev => prev.filter(c => c.id !== challenge.id));
+    await sendChat(`accepted ${liveMembers.find(m => m.id === challenge.challenger_id)?.name}'s battle challenge ⚔️`);
+  };
+
+  const handleDeclineChallenge = async (challenge: DBBattleChallenge) => {
+    await respondToChallenge(challenge.id, false);
+    setPendingChallenges(prev => prev.filter(c => c.id !== challenge.id));
+    const challenger = liveMembers.find(m => m.id === challenge.challenger_id);
+    showToast(`Declined ${challenger?.name}'s challenge 🐔`, '😤', '#6b7280');
+  };
 
   const handleBattleComplete = async (won: boolean, coinsWon: number) => {
-    setBattleTargetId(null);
     const enemy = liveMembers.find(m => m.id === battleTargetId);
+    setBattleTargetId(null);
+
+    // Mark challenge completed in DB if this was a challenge battle
+    if (activeChallengeId) {
+      await completeBattleChallenge(
+        activeChallengeId,
+        won ? controlledMemberId : (battleTargetId || ''),
+        coinsWon
+      );
+      setActiveChallengeId(null);
+    }
 
     if (won) {
       const newCoins = playerCoins + coinsWon;
@@ -110,6 +294,12 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
 
   const battleEnemy = battleTargetId ? liveMembers.find(m => m.id === battleTargetId) : null;
 
+  // First pending challenge to show (most recent)
+  const topChallenge = pendingChallenges[0] ?? null;
+  const topChallenger = topChallenge
+    ? (liveMembers.find(m => m.id === topChallenge.challenger_id) || TEAM_MEMBERS.find(m => m.id === topChallenge.challenger_id))
+    : null;
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(135deg, #080814 0%, #0d1117 50%, #080814 100%)', color: '#e2e8f0' }}>
       {/* Header */}
@@ -139,6 +329,25 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
               <span>{activeZone.emoji}</span>
               <span className="font-medium hidden sm:inline">{activeZone.name}</span>
             </div>
+          )}
+
+          {/* Pending challenge badge in header */}
+          {pendingChallenges.length > 0 && !battleEnemy && (
+            <button
+              onClick={() => {
+                if (topChallenge && topChallenger) {
+                  // Re-show notification by forcing state trigger — it's already shown via overlay
+                }
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold animate-pulse"
+              style={{
+                background: 'rgba(239,68,68,0.2)',
+                border: '1px solid rgba(239,68,68,0.5)',
+                color: '#fca5a5',
+              }}>
+              <span>⚔️</span>
+              <span>{pendingChallenges.length} challenge{pendingChallenges.length > 1 ? 's' : ''}!</span>
+            </button>
           )}
 
           {/* Right side */}
@@ -206,13 +415,34 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
         {tab === 'admin' && isScott && <AdminPanel currentUserId={controlledMemberId} />}
       </main>
 
+      {/* ── Incoming challenge overlay (shown when not in battle) ── */}
+      {topChallenge && topChallenger && !battleEnemy && (
+        <ChallengeNotification
+          challenge={topChallenge}
+          challengerName={topChallenger.name}
+          onAccept={() => handleAcceptChallenge(topChallenge)}
+          onDecline={() => handleDeclineChallenge(topChallenge)}
+        />
+      )}
+
+      {/* ── Challenge sent confirmation banner ── */}
+      {challengeSentTarget && (
+        <ChallengeSentBanner
+          targetName={challengeSentTarget}
+          onDismiss={() => setChallengeSentTarget(null)}
+        />
+      )}
+
       {/* Battle modal */}
       {battleEnemy && (
         <BattleModal
           player={{ ...me, coins: playerCoins }}
           enemy={battleEnemy}
           onComplete={handleBattleComplete}
-          onClose={() => setBattleTargetId(null)}
+          onClose={() => {
+            setBattleTargetId(null);
+            setActiveChallengeId(null);
+          }}
         />
       )}
 

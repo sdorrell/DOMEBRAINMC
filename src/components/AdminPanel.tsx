@@ -6,7 +6,8 @@ import {
   subscribeToSuggestions, subscribeToUpdateRequests,
   getConfig, setConfig,
   fetchWorkSummaries, getFlaggedSessions, flagSpamSession, unflagSpamSession,
-  type DBSuggestion, type DBUpdateRequest, type DBWorkSummary,
+  fetchWorldRequests, updateWorldRequestStatus,
+  type DBSuggestion, type DBUpdateRequest, type DBWorkSummary, type DBWorldRequest,
 } from '../lib/supabase';
 import { TEAM_MEMBERS } from '../data/gameData';
 
@@ -47,7 +48,9 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
   const [requests, setRequests] = useState<DBUpdateRequest[]>([]);
   const [workSummaries, setWorkSummaries] = useState<DBWorkSummary[]>([]);
   const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
-  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented' | 'settings' | 'moderation'>('ai');
+  const [worldRequests, setWorldRequests] = useState<DBWorldRequest[]>([]);
+  const [activeSection, setActiveSection] = useState<'requests' | 'ai' | 'implemented' | 'settings' | 'moderation' | 'world'>('ai');
+  const [updatingWorld, setUpdatingWorld] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [savingForLater, setSavingForLater] = useState<string | null>(null);
@@ -67,11 +70,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
       getConfig('nightly_prompt_notes'),
       fetchWorkSummaries(40),
       getFlaggedSessions(),
-    ]).then(([s, r, cfg, ws, flags]) => {
+      fetchWorldRequests(),
+    ]).then(([s, r, cfg, ws, flags, wr]) => {
       setSuggestions(s);
       setRequests(r);
       setWorkSummaries(ws);
       setFlaggedIds(flags);
+      setWorldRequests(wr);
       const notes = cfg || '';
       setPromptNotes(notes);
       setSavedPromptNotes(notes);
@@ -155,6 +160,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
     setApproving(null);
   };
 
+  const handleWorldStatus = async (id: string, status: DBWorldRequest['status']) => {
+    setUpdatingWorld(id);
+    await updateWorldRequestStatus(id, status);
+    setWorldRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    setUpdatingWorld(null);
+  };
+
   const handleFlagSession = async (session: DBWorkSummary) => {
     const memberId = resolveMemberId(session.team_member);
     if (!memberId) { alert(`Can't resolve member for "${session.team_member}"`); return; }
@@ -185,9 +197,12 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
 
   const promptHasChanges = promptNotes !== savedPromptNotes;
 
+  const pendingWorldRequests = worldRequests.filter(r => r.status === 'open');
+
   const SECTIONS = [
     { id: 'ai' as const, label: '🤖 AI Suggestions', count: pendingSuggestions.length + approvedSuggestions.length },
     { id: 'requests' as const, label: '📬 Team Requests', count: openRequests.length },
+    { id: 'world' as const, label: '🌍 World Lab', count: pendingWorldRequests.length },
     { id: 'implemented' as const, label: '✅ Implemented', count: implementedSuggestions.length },
     { id: 'moderation' as const, label: '🐀 Moderation', count: flaggedIds.length },
     { id: 'settings' as const, label: '⚙️ Settings', count: 0 },
@@ -365,6 +380,96 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ── World Lab ── */}
+            {activeSection === 'world' && (
+              <div className="flex flex-col gap-3">
+                <div className="rounded-xl p-4 flex items-start gap-3"
+                  style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.25)' }}>
+                  <div className="text-2xl">🌍</div>
+                  <div>
+                    <div className="text-white font-bold text-sm mb-1">World Lab Requests</div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Team members submit world change requests from the World Lab panel. Approve to queue for implementation, or decline to bury them.
+                    </p>
+                  </div>
+                </div>
+
+                {worldRequests.length === 0 ? (
+                  <div className="text-center py-10 text-gray-600 text-sm">No world requests yet — the team hasn't been bold enough</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {worldRequests.map(req => {
+                      const isUpdating = updatingWorld === req.id;
+                      const member = TEAM_MEMBERS.find(m => m.id === req.author_id);
+                      const STATUS_COLOR: Record<string, { color: string; bg: string }> = {
+                        open: { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
+                        approved: { color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
+                        implemented: { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+                        declined: { color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
+                      };
+                      const sc = STATUS_COLOR[req.status] || STATUS_COLOR.open;
+                      const CATEGORY_LABELS: Record<string, string> = {
+                        new_zone: '🏗️ New Zone', decoration: '🎨 Decoration', event: '🎉 Event', rule_change: '📋 Rule Change', other: '💬 Other',
+                      };
+
+                      return (
+                        <div key={req.id} className="p-4 rounded-xl transition-all"
+                          style={{ background: req.status === 'approved' ? 'rgba(74,222,128,0.05)' : 'rgba(255,255,255,0.03)', border: `1px solid ${req.status === 'approved' ? 'rgba(74,222,128,0.25)' : 'rgba(255,255,255,0.08)'}` }}>
+                          <div className="flex items-start gap-3">
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                              style={{ background: member?.avatarColor || '#555' }}>{(member?.name || req.author_id)[0]}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <span className="font-bold text-white text-sm">{req.title}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ color: sc.color, background: sc.bg }}>● {req.status}</span>
+                                <span className="text-[10px] text-gray-500">{CATEGORY_LABELS[req.category] || req.category}</span>
+                                {req.upvotes.length > 0 && <span className="text-[10px] text-indigo-300">👍 {req.upvotes.length}</span>}
+                              </div>
+                              {req.description && <p className="text-xs text-gray-400 mb-2">{req.description}</p>}
+                              <div className="text-[10px] text-gray-600">{member?.name || req.author_id} · {new Date(req.created_at).toLocaleDateString()}</div>
+                              {req.status === 'open' && (
+                                <div className="flex gap-2 mt-2">
+                                  <button onClick={() => handleWorldStatus(req.id, 'approved')} disabled={isUpdating}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
+                                    {isUpdating ? '...' : '✅ Approve'}
+                                  </button>
+                                  <button onClick={() => handleWorldStatus(req.id, 'implemented')} disabled={isUpdating}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.4)', color: '#a78bfa' }}>
+                                    {isUpdating ? '...' : '⚡ Mark Built'}
+                                  </button>
+                                  <button onClick={() => handleWorldStatus(req.id, 'declined')} disabled={isUpdating}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280' }}>
+                                    {isUpdating ? '...' : '✗ Decline'}
+                                  </button>
+                                </div>
+                              )}
+                              {req.status === 'approved' && (
+                                <div className="flex gap-2 mt-2">
+                                  <button onClick={() => handleWorldStatus(req.id, 'implemented')} disabled={isUpdating}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.4)', color: '#a78bfa' }}>
+                                    {isUpdating ? '...' : '⚡ Mark Built'}
+                                  </button>
+                                  <button onClick={() => handleWorldStatus(req.id, 'open')} disabled={isUpdating}
+                                    className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                                    style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280' }}>
+                                    {isUpdating ? '...' : '↩ Undo'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

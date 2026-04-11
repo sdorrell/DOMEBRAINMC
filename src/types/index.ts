@@ -45,6 +45,10 @@ export interface BattleAction {
   description: string;
   isUltimate?: boolean;
   critChance?: number;
+  // Status effects
+  burnTurns?: number;    // applies burn to target (8 dmg/turn)
+  freezeTurns?: number;  // freezes target (they skip next N turns)
+  boostSelf?: number;    // boosts own damage multiplier for N turns
 }
 
 export interface FloatingText {
@@ -66,6 +70,13 @@ export interface BattleState {
   enemyCoins: number;
   playerShieldTurns: number;
   enemyShieldTurns: number;
+  // Status effects
+  playerBurnTurns: number;
+  enemyBurnTurns: number;
+  playerFreezeTurns: number;
+  enemyFreezeTurns: number;
+  playerBoostTurns: number;
+  enemyBoostTurns: number;
   turn: number;
   log: string[];
   floatingTexts: FloatingText[];

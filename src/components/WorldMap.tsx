@@ -3,6 +3,7 @@ import {
   WORLD_COLS, WORLD_ROWS,
   ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier,
 } from '../data/gameData';
+import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, type DBWorldRequest } from '../lib/supabase';
 import type { TeamMember, Zone, Emote } from '../types';
 
 // ─── ISO CONFIG ───────────────────────────────────────────────────────────────
@@ -848,6 +849,52 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
 
   const me = members.find(m => m.id === controlledMemberId) || TEAM_MEMBERS[0];
 
+  // ─── World Lab state ───────────────────────────────────────────────────────
+  const [showWorldLab, setShowWorldLab] = useState(false);
+  const [worldRequests, setWorldRequests] = useState<DBWorldRequest[]>([]);
+  const [wlTitle, setWlTitle] = useState('');
+  const [wlDesc, setWlDesc] = useState('');
+  const [wlCategory, setWlCategory] = useState<DBWorldRequest['category']>('other');
+  const [wlSubmitting, setWlSubmitting] = useState(false);
+  const [wlSubmitted, setWlSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (showWorldLab) {
+      fetchWorldRequests().then(setWorldRequests);
+    }
+  }, [showWorldLab]);
+
+  const handleWorldLabSubmit = async () => {
+    if (!wlTitle.trim()) return;
+    setWlSubmitting(true);
+    await createWorldRequest({
+      author_id: controlledMemberId,
+      title: wlTitle.trim(),
+      description: wlDesc.trim() || null,
+      category: wlCategory,
+      status: 'open',
+      upvotes: [],
+    });
+    setWlTitle(''); setWlDesc(''); setWlCategory('other');
+    setWlSubmitting(false);
+    setWlSubmitted(true);
+    setTimeout(() => setWlSubmitted(false), 3000);
+    fetchWorldRequests().then(setWorldRequests);
+  };
+
+  const handleWorldUpvote = async (req: DBWorldRequest) => {
+    const next = await toggleWorldRequestUpvote(req.id, controlledMemberId, req.upvotes);
+    setWorldRequests(prev => prev.map(r => r.id === req.id ? { ...r, upvotes: next } : r));
+  };
+
+  const CATEGORY_LABELS: Record<DBWorldRequest['category'], string> = {
+    new_zone: '🏗️ New Zone',
+    decoration: '🎨 Decoration',
+    event: '🎉 Event',
+    rule_change: '📋 Rule Change',
+    other: '💬 Other',
+  };
+
   return (
     <div className="flex gap-3 h-full">
       {/* Canvas */}
@@ -1039,7 +1086,8 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
       </div>
 
       {/* Right sidebar — hidden on mobile */}
-      <div className="hidden sm:flex w-44 flex-col gap-3 shrink-0">
+      <div className="hidden sm:flex w-48 flex-col gap-3 shrink-0">
+        {/* Online Now */}
         <div className="rounded-xl p-3" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }}>
           <div className="text-[10px] font-bold text-blue-300/60 uppercase tracking-wider mb-2">Online Now</div>
           {members.filter(m => m.status !== 'offline').map(m => {
@@ -1062,7 +1110,8 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
           })}
         </div>
 
-        <div className="rounded-xl p-3 flex-1" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }}>
+        {/* Biomes */}
+        <div className="rounded-xl p-3" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }}>
           <div className="text-[10px] font-bold text-blue-300/60 uppercase tracking-wider mb-2">Biomes</div>
           {ZONES.map(z => {
             const b = BIOME[z.id] || BIOME.grind_zone;
@@ -1073,6 +1122,92 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onChallenge,
               </div>
             );
           })}
+        </div>
+
+        {/* 🌍 World Lab */}
+        <div className="rounded-xl flex-1 flex flex-col overflow-hidden" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(99,102,241,0.3)' }}>
+          <button
+            onClick={() => setShowWorldLab(v => !v)}
+            className="flex items-center gap-2 px-3 py-2.5 w-full text-left transition-colors hover:bg-white/5"
+          >
+            <span className="text-base">🌍</span>
+            <div className="flex-1">
+              <div className="text-[11px] font-bold text-indigo-300">World Lab</div>
+              <div className="text-[9px] text-gray-500">Shape the world</div>
+            </div>
+            <span className="text-gray-500 text-xs">{showWorldLab ? '▲' : '▼'}</span>
+          </button>
+
+          {showWorldLab && (
+            <div className="flex-1 overflow-y-auto px-3 pb-3 flex flex-col gap-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              {/* Submit form */}
+              <div className="flex flex-col gap-2 pt-2">
+                <div className="text-[10px] text-gray-500 leading-relaxed">Submit a world change request. Scott reviews and approves what gets built.</div>
+                <input
+                  className="w-full bg-black/40 rounded-lg px-2 py-1.5 text-xs text-white outline-none border border-white/10 focus:border-indigo-400/50"
+                  placeholder="What do you want to add?"
+                  value={wlTitle}
+                  onChange={e => setWlTitle(e.target.value)}
+                />
+                <textarea
+                  className="w-full bg-black/40 rounded-lg px-2 py-1.5 text-xs text-white outline-none border border-white/10 focus:border-indigo-400/50 resize-none"
+                  placeholder="Describe the idea..."
+                  rows={2}
+                  value={wlDesc}
+                  onChange={e => setWlDesc(e.target.value)}
+                />
+                <select
+                  className="w-full bg-black/40 rounded-lg px-2 py-1.5 text-xs text-gray-300 outline-none border border-white/10"
+                  value={wlCategory}
+                  onChange={e => setWlCategory(e.target.value as DBWorldRequest['category'])}
+                >
+                  {(Object.entries(CATEGORY_LABELS) as [DBWorldRequest['category'], string][]).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleWorldLabSubmit}
+                  disabled={wlSubmitting || !wlTitle.trim()}
+                  className="w-full py-1.5 rounded-lg text-xs font-bold text-white transition-all disabled:opacity-40"
+                  style={{ background: wlSubmitted ? 'rgba(74,222,128,0.3)' : 'rgba(99,102,241,0.5)', border: `1px solid ${wlSubmitted ? 'rgba(74,222,128,0.5)' : 'rgba(99,102,241,0.7)'}` }}
+                >
+                  {wlSubmitting ? '...' : wlSubmitted ? '✓ Submitted!' : '🚀 Submit Request'}
+                </button>
+              </div>
+
+              {/* Recent requests */}
+              {worldRequests.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">Recent Requests</div>
+                  {worldRequests.slice(0, 8).map(req => {
+                    const hasVoted = req.upvotes.includes(controlledMemberId);
+                    const STATUS_COLOR: Record<string, string> = { open: '#6b7280', approved: '#22c55e', implemented: '#6366f1', declined: '#ef4444' };
+                    return (
+                      <div key={req.id} className="rounded-lg p-2 flex flex-col gap-1" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div className="flex items-start gap-1.5">
+                          <button
+                            onClick={() => handleWorldUpvote(req)}
+                            className="flex flex-col items-center gap-0 shrink-0 px-1 py-0.5 rounded"
+                            style={{ background: hasVoted ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)' }}
+                          >
+                            <span className="text-[10px]">{hasVoted ? '▲' : '△'}</span>
+                            <span className="text-[9px] font-bold" style={{ color: hasVoted ? '#a5b4fc' : '#6b7280' }}>{req.upvotes.length}</span>
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[10px] font-semibold text-white leading-tight truncate">{req.title}</div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[9px]" style={{ color: STATUS_COLOR[req.status] || '#6b7280' }}>● {req.status}</span>
+                              <span className="text-[9px] text-gray-600">· {CATEGORY_LABELS[req.category]?.split(' ')[0]}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
