@@ -3,7 +3,7 @@ import {
   WORLD_COLS, WORLD_ROWS,
   ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier,
 } from '../data/gameData';
-import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, type DBWorldRequest } from '../lib/supabase';
+import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, type DBWorldRequest } from '../lib/supabase';
 import type { TeamMember, Zone, Emote } from '../types';
 
 // ─── ISO CONFIG ───────────────────────────────────────────────────────────────
@@ -736,6 +736,11 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
   const statesRef = useRef<Record<string, PlayerState>>({});
   const currentZoneRef = useRef<Zone | null>(null);
 
+  // ── DOME Brain ripple effects ─────────────────────────────────────────────
+  interface BrainRipple { id: number; gridX: number; gridY: number; startTime: number; color: string; label: string; }
+  const ripplesRef = useRef<BrainRipple[]>([]);
+  const rippleIdRef = useRef(0);
+
   const [playerStates, setPlayerStates] = useState<Record<string, PlayerState>>(() => {
     const init = Object.fromEntries(members.map(m => [m.id, {
       x: m.worldX, y: m.worldY, dir: 's' as const,
@@ -747,6 +752,25 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
 
   // Sync ref with state
   useEffect(() => { statesRef.current = playerStates; }, [playerStates]);
+
+  // ── Subscribe to DOME Brain work summaries → trigger ripple on map ─────────
+  useEffect(() => {
+    const channel = subscribeToWorkSummaries((summary) => {
+      // Find the team member by name (dome_work_summaries stores name, not id)
+      const member = members.find(m => m.name.toLowerCase() === summary.team_member.toLowerCase());
+      const state = member ? statesRef.current[member.id] : null;
+      const gridX = state?.x ?? (member?.worldX ?? 0);
+      const gridY = state?.y ?? (member?.worldY ?? 0);
+      const color = member?.avatarColor ?? '#6366f1';
+      const label = `🧠 ${summary.team_member}`;
+      ripplesRef.current = [
+        ...ripplesRef.current,
+        { id: rippleIdRef.current++, gridX, gridY, startTime: Date.now(), color, label },
+      ];
+    });
+    return () => { channel.unsubscribe(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateCamera = useCallback((nx: number, ny: number) => {
     const c = canvasRef.current;
@@ -990,6 +1014,50 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
       // ── RENDER (back to front)
       items.sort((a,b) => a.sort - b.sort);
       items.forEach(i => i.draw());
+
+      // ── DOME BRAIN RIPPLES ─────────────────────────────────────────────────
+      const now = Date.now();
+      const RIPPLE_DURATION = 3200;
+      ripplesRef.current = ripplesRef.current.filter(r => now - r.startTime < RIPPLE_DURATION);
+      for (const ripple of ripplesRef.current) {
+        const progress = (now - ripple.startTime) / RIPPLE_DURATION;
+        const { x: rx, y: ry } = iso(ripple.gridX, ripple.gridY, cam.x, cam.y);
+        const centerX = rx;
+        const centerY = ry + TH / 2 - WALL;
+        // Draw 3 expanding rings with staggered timing
+        for (let ring = 0; ring < 3; ring++) {
+          const ringProgress = Math.max(0, Math.min(1, (progress - ring * 0.18)));
+          if (ringProgress <= 0) continue;
+          const alpha = (1 - ringProgress) * 0.75;
+          const radiusX = ringProgress * 54;
+          const radiusY = ringProgress * 27;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = ripple.color;
+          ctx.lineWidth = 2.5 - ring * 0.5;
+          ctx.beginPath();
+          ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Label (fades in quickly, stays, then fades out)
+        if (progress < 0.85) {
+          const labelAlpha = progress < 0.12 ? progress / 0.12 : (1 - (progress - 0.65) / 0.2);
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, labelAlpha));
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const labelW = ctx.measureText(ripple.label).width;
+          ctx.fillStyle = 'rgba(0,0,0,0.72)';
+          ctx.beginPath();
+          ctx.roundRect(centerX - labelW / 2 - 6, centerY - WALL - 20, labelW + 12, 16, 4);
+          ctx.fill();
+          ctx.fillStyle = ripple.color;
+          ctx.fillText(ripple.label, centerX, centerY - WALL - 12);
+          ctx.restore();
+        }
+      }
 
       animRef.current = requestAnimationFrame(loop);
     };

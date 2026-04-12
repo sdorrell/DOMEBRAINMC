@@ -625,3 +625,35 @@ export function subscribeToIdeas(callback: (idea: DBIdea) => void) {
     })
     .subscribe();
 }
+
+// ─── Weekly XP gains ──────────────────────────────────────────────────────────
+
+export async function fetchWeeklyXpGains(): Promise<{ memberId: string; gain: number }[]> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('mc_xp_events')
+    .select('member_id, xp_delta')
+    .gte('created_at', sevenDaysAgo);
+  if (error) { console.error('fetchWeeklyXpGains:', error); return []; }
+  if (!data || data.length === 0) return [];
+  const byMember: Record<string, number> = {};
+  for (const ev of data) {
+    byMember[ev.member_id] = (byMember[ev.member_id] ?? 0) + ev.xp_delta;
+  }
+  return Object.entries(byMember)
+    .map(([memberId, gain]) => ({ memberId, gain }))
+    .sort((a, b) => b.gain - a.gain);
+}
+
+// ─── Work Summaries Realtime ──────────────────────────────────────────────────
+
+export function subscribeToWorkSummaries(callback: (summary: DBWorkSummary) => void) {
+  return supabase
+    .channel('mc_work_summaries_realtime')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'dome_work_summaries',
+    }, payload => callback(payload.new as DBWorkSummary))
+    .subscribe();
+}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, BADGES, getLevelTier, WORK_LOGS, IDEAS } from '../data/gameData';
-import { fetchXpEvents } from '../lib/supabase';
+import { fetchXpEvents, fetchWeeklyXpGains } from '../lib/supabase';
 import type { DBXpEvent } from '../lib/supabase';
 import type { TeamMember } from '../types';
 
@@ -120,6 +120,15 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
   const topXP = sorted[0]?.xp || 1;
 
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [weeklyChamp, setWeeklyChamp] = useState<{ memberId: string; gain: number } | null>(null);
+
+  useEffect(() => {
+    fetchWeeklyXpGains().then(gains => {
+      if (gains.length > 0 && gains[0].gain > 0) {
+        setWeeklyChamp(gains[0]);
+      }
+    });
+  }, []);
 
   const logsByMember = Object.fromEntries(
     members.map(m => [m.id, WORK_LOGS.filter(l => l.authorId === m.id).length])
@@ -140,6 +149,39 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
           <h2 className="text-lg font-bold text-white">🏆 Leaderboard</h2>
           <p className="text-xs text-gray-400">XP rankings, badge counts, contribution stats. <span className="text-indigo-400">Click any row to see XP breakdown.</span></p>
         </div>
+
+        {/* Weekly Champion Banner */}
+        {weeklyChamp && (() => {
+          const champ = members.find(m => m.id === weeklyChamp.memberId);
+          if (!champ) return null;
+          return (
+            <div
+              className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
+              style={{
+                background: 'linear-gradient(135deg, rgba(255,214,0,0.12), rgba(255,140,0,0.08))',
+                border: '1px solid rgba(255,214,0,0.35)',
+                boxShadow: '0 0 18px rgba(255,214,0,0.1)',
+              }}
+            >
+              <span className="text-2xl">👑</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-yellow-500/70">Weekly XP Champion</div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0"
+                    style={{ background: champ.avatarColor }}
+                  >{champ.name[0]}</div>
+                  <span className="font-black text-white text-sm">{champ.name}</span>
+                  <span className="text-xs text-gray-400">{champ.role}</span>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-yellow-400 font-black text-base">+{weeklyChamp.gain.toLocaleString()} XP</div>
+                <div className="text-[10px] text-yellow-600">this week</div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Top 3 podium */}
         <div className="grid grid-cols-3 gap-3">
@@ -224,7 +266,12 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
                             style={{ background: m.avatarColor }}
                           >{m.name[0]}</div>
                           <div>
-                            <div className="font-medium text-white text-sm">{m.name}</div>
+                            <div className="font-medium text-white text-sm flex items-center gap-1">
+                              {m.name}
+                              {weeklyChamp?.memberId === m.id && (
+                                <span title={`Weekly XP Champion (+${weeklyChamp.gain} XP this week)`} className="text-sm leading-none">👑</span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-gray-500">{m.role}</div>
                           </div>
                         </div>
