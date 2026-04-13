@@ -28,6 +28,8 @@ function mergeMember(base: TeamMember, live: DBPlayerState | undefined): TeamMem
     worldY: live.world_y,
     status: live.status,
     lastActive: live.last_active ? relativeTime(live.last_active) : base.lastActive,
+    mood: live.mood ?? null,
+    loginStreak: live.login_streak ?? 0,
   };
 }
 

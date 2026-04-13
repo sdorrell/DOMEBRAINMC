@@ -30,6 +30,8 @@ export interface TeamMember {
   status: 'online' | 'away' | 'offline';
   lastActive: string;
   joinedDate: string;
+  mood?: string | null;
+  loginStreak?: number;
 }
 
 export interface BattleAction {
