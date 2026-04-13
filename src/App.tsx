@@ -16,16 +16,21 @@ import { TEAM_MEMBERS, getLevelTier, ZONES } from './data/gameData';
 import {
   sendBattleChallenge,
   fetchPendingChallenges,
+  fetchOutgoingChallenges,
   subscribeToBattleChallenges,
   respondToChallenge,
   completeBattleChallenge,
   type DBBattleChallenge,
   logMeetingSession,
+  getConfig,
+  setConfig,
+  sendChatMessage,
+  updateLoginStreak,
 } from './lib/supabase';
 import type { Zone, TeamMember } from './types';
 import './index.css';
 
-type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'requests' | 'admin';
+type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'battles' | 'requests' | 'admin';
 
 export default function App() {
   const [loggedInId, setLoggedInId] = useState<string | null>(() => {
@@ -300,6 +305,123 @@ function DomeMeetingModal({
   );
 }
 
+// ─── Challenge Inbox ──────────────────────────────────────────────────────────
+
+function ChallengesInbox({
+  currentUserId,
+  incoming,
+  liveMembers,
+  onAccept,
+  onDecline,
+}: {
+  currentUserId: string;
+  incoming: DBBattleChallenge[];
+  liveMembers: import('./types').TeamMember[];
+  onAccept: (c: DBBattleChallenge) => void;
+  onDecline: (c: DBBattleChallenge) => void;
+}) {
+  const [outgoing, setOutgoing] = useState<DBBattleChallenge[]>([]);
+  useEffect(() => {
+    fetchOutgoingChallenges(currentUserId).then(setOutgoing);
+  }, [currentUserId]);
+
+  const getMember = (id: string) =>
+    liveMembers.find(m => m.id === id) || TEAM_MEMBERS.find(m => m.id === id);
+
+  function timeLeft(expiresAt: string) {
+    const diff = new Date(expiresAt).getTime() - Date.now();
+    if (diff <= 0) return 'Expired';
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  }
+
+  function timeAgo(iso: string) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+  }
+
+  const ChallengeCard = ({ c, type }: { c: DBBattleChallenge; type: 'incoming' | 'outgoing' }) => {
+    const other = type === 'incoming' ? getMember(c.challenger_id) : getMember(c.defender_id);
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-xl"
+        style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${type === 'incoming' ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}` }}>
+        <div className="text-2xl">{type === 'incoming' ? '⚔️' : '📤'}</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-white">
+            {type === 'incoming' ? `${other?.name ?? 'Someone'} challenged you!` : `Challenged ${other?.name ?? 'someone'}`}
+          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
+            <span>Sent {timeAgo(c.created_at)}</span>
+            <span>·</span>
+            <span style={{ color: type === 'incoming' ? '#f87171' : '#a78bfa' }}>{timeLeft(c.expires_at)}</span>
+          </div>
+        </div>
+        {type === 'incoming' && (
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => onDecline(c)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: '#9ca3af' }}>
+              Decline
+            </button>
+            <button onClick={() => onAccept(c)}
+              className="px-3 py-1.5 rounded-lg text-xs font-black transition-all hover:scale-105"
+              style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)', color: 'white', border: 'none', boxShadow: '0 0 12px rgba(239,68,68,0.4)' }}>
+              ⚔️ Fight!
+            </button>
+          </div>
+        )}
+        {type === 'outgoing' && (
+          <div className="shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-yellow-400/70"
+            style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
+            Awaiting...
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const hasAny = incoming.length > 0 || outgoing.length > 0;
+
+  return (
+    <div className="flex flex-col gap-5 h-full overflow-y-auto">
+      <div>
+        <h2 className="text-lg font-bold text-white">⚔️ Battle Challenges</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Incoming and outgoing pending challenge requests.</p>
+      </div>
+
+      {!hasAny && (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+          <div className="text-5xl opacity-30">⚔️</div>
+          <div className="text-gray-500 text-sm">No active challenges right now.</div>
+          <div className="text-gray-600 text-xs">Walk up to a teammate on the World Map to challenge them!</div>
+        </div>
+      )}
+
+      {incoming.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-red-400/70">
+            Incoming ({incoming.length})
+          </div>
+          {incoming.map(c => <ChallengeCard key={c.id} c={c} type="incoming" />)}
+        </div>
+      )}
+
+      {outgoing.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-400/70">
+            Outgoing ({outgoing.length})
+          </div>
+          {outgoing.map(c => <ChallengeCard key={c.id} c={c} type="outgoing" />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
 function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string; onLogout: () => void }) {
@@ -349,6 +471,27 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
       channelRef.current?.unsubscribe();
     };
   }, [controlledMemberId]);
+
+  // ─── Daily standup prompt — posts at 9am if not yet sent today ───────────────
+  useEffect(() => {
+    if (!ready) return;
+    const now = new Date();
+    if (now.getHours() < 9) return;
+    const todayStr = now.toISOString().slice(0, 10);
+    getConfig('last_standup_date').then(lastDate => {
+      if (lastDate !== todayStr) {
+        sendChatMessage('dome-mc', '🌅 Good morning DOME! What are you working on today?').then(() => {
+          setConfig('last_standup_date', todayStr);
+        });
+      }
+    });
+  }, [ready]);
+
+  // ─── Login streak — update on first load ──────────────────────────────────────
+  useEffect(() => {
+    if (!ready) return;
+    updateLoginStreak(controlledMemberId);
+  }, [ready, controlledMemberId]);
 
   // ─── XP gain detection — fires floating bubbles whenever any member gains XP ─
   useEffect(() => {
@@ -459,6 +602,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     { id: 'ideas', label: 'Ideas', emoji: '💡' },
     { id: 'badges', label: 'Badges', emoji: '🎖️' },
     { id: 'leaderboard', label: 'Leaderboard', emoji: '🏆' },
+    { id: 'battles', label: 'Battles', emoji: '⚔️' },
     { id: 'requests', label: 'Requests', emoji: '📬' },
     ...(isScott ? [{ id: 'admin' as Tab, label: 'Upgrades', emoji: '⚡', adminOnly: true }] : []),
   ];
@@ -584,6 +728,15 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
         {tab === 'ideas' && <IdeasBoard currentUserId={controlledMemberId} />}
         {tab === 'badges' && <BadgesView />}
         {tab === 'leaderboard' && <Leaderboard liveMembers={liveMembers} />}
+        {tab === 'battles' && (
+          <ChallengesInbox
+            currentUserId={controlledMemberId}
+            incoming={pendingChallenges}
+            liveMembers={liveMembers}
+            onAccept={handleAcceptChallenge}
+            onDecline={handleDeclineChallenge}
+          />
+        )}
         {tab === 'requests' && <UpdateRequests currentUserId={controlledMemberId} />}
         {tab === 'admin' && isScott && <AdminPanel currentUserId={controlledMemberId} />}
       </main>

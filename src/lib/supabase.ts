@@ -19,6 +19,9 @@ export interface DBPlayerState {
   world_y: number;
   status: 'online' | 'away' | 'offline';
   last_active: string;
+  mood?: string | null;
+  login_streak?: number;
+  last_login_date?: string | null;
 }
 
 export interface DBIdea {
@@ -515,6 +518,36 @@ export async function fetchPendingChallenges(memberId: string): Promise<DBBattle
     .order('created_at', { ascending: false });
   if (error) { console.error('fetchPendingChallenges:', error); return []; }
   return data || [];
+}
+
+export async function fetchOutgoingChallenges(memberId: string): Promise<DBBattleChallenge[]> {
+  const { data, error } = await supabase
+    .from('mc_battle_challenges')
+    .select('*')
+    .eq('challenger_id', memberId)
+    .eq('status', 'pending')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchOutgoingChallenges:', error); return []; }
+  return data || [];
+}
+
+export async function updateLoginStreak(memberId: string): Promise<number> {
+  const { data } = await supabase
+    .from('mc_player_state')
+    .select('login_streak, last_login_date')
+    .eq('member_id', memberId)
+    .maybeSingle();
+  if (!data) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  if (data.last_login_date === today) return data.login_streak ?? 0;
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const newStreak = data.last_login_date === yesterday ? (data.login_streak ?? 0) + 1 : 1;
+  await supabase
+    .from('mc_player_state')
+    .update({ login_streak: newStreak, last_login_date: today })
+    .eq('member_id', memberId);
+  return newStreak;
 }
 
 export async function respondToChallenge(id: string, accept: boolean): Promise<void> {

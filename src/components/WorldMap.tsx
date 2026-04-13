@@ -3,7 +3,7 @@ import {
   WORLD_COLS, WORLD_ROWS,
   ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier,
 } from '../data/gameData';
-import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, type DBWorldRequest } from '../lib/supabase';
+import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, updatePlayerState, type DBWorldRequest } from '../lib/supabase';
 import type { TeamMember, Zone, Emote } from '../types';
 
 // ─── ISO CONFIG ───────────────────────────────────────────────────────────────
@@ -643,6 +643,22 @@ function drawPolyAvatar(
   ctx.fillStyle = tier.color;
   ctx.fillText(`Lv${member.level}`, bx, nameY + 8);
 
+  // ── Mood emoji badge (persistent, shown below name plate)
+  if (member.mood) {
+    const moodY = nameY + 18;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(bx - 11, moodY - 8, 22, 16, 5);
+    ctx.fill();
+    ctx.fillText(member.mood, bx, moodY);
+    ctx.restore();
+  }
+
   // ── Status dot (glowing when online)
   const statusColor = member.status === 'online' ? '#69f0ae' : member.status === 'away' ? '#ffcc02' : '#546e7a';
   const dotX = bx + nw/2 + 5;
@@ -728,6 +744,19 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
   const [chatInput, setChatInput] = useState('');
   const [showEmotes, setShowEmotes] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showMoodPicker, setShowMoodPicker] = useState(false);
+  const [myMood, setMyMood] = useState<string | null>(() =>
+    members.find(m => m.id === controlledMemberId)?.mood ?? null
+  );
+
+  const MOODS = [
+    { emoji: '😤', label: 'Grind Mode' },
+    { emoji: '🧠', label: 'Deep Focus' },
+    { emoji: '🔥', label: 'On Fire' },
+    { emoji: '😴', label: 'Low Energy' },
+    { emoji: '🎯', label: 'Locked In' },
+    { emoji: '💡', label: 'Ideating' },
+  ];
   const [currentZone, setCurrentZone] = useState<Zone | null>(null);
   const [hoveredMember, setHoveredMember] = useState<TeamMember | null>(null);
   const [nearbyMember, setNearbyMember] = useState<TeamMember | null>(null);
@@ -1301,9 +1330,12 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
           <div className="overflow-y-auto flex flex-col gap-0.5" style={{ maxHeight: 68 }}>
             {chatMessages.slice(-6).map(msg => {
               const m = members.find(x => x.id === msg.authorId);
+              const isBot = msg.authorId === 'dome-mc';
+              const displayName = isBot ? '🌅 DOME' : (m?.name || msg.authorId);
+              const displayColor = isBot ? '#fbbf24' : (m?.avatarColor || '#aaa');
               return (
                 <div key={msg.id} className="text-xs flex gap-2">
-                  <span className="font-bold shrink-0" style={{ color: m?.avatarColor || '#aaa' }}>{m?.name}:</span>
+                  <span className="font-bold shrink-0" style={{ color: displayColor }}>{displayName}:</span>
                   <span className="text-gray-300">{msg.text}</span>
                 </div>
               );
@@ -1311,6 +1343,14 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowEmotes(v => !v)} className="text-lg px-1.5 py-0.5 rounded-lg hover:bg-white/10 transition-colors">😄</button>
+            <button
+              onClick={() => setShowMoodPicker(v => !v)}
+              title="Set your mood"
+              className="text-lg px-1.5 py-0.5 rounded-lg hover:bg-white/10 transition-colors relative"
+              style={{ border: showMoodPicker ? '1px solid rgba(99,102,241,0.5)' : '1px solid transparent' }}>
+              {myMood ?? '🎭'}
+              {myMood && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-indigo-400" />}
+            </button>
             <input
               className="flex-1 bg-white/5 rounded-lg px-3 py-1.5 text-sm text-white outline-none border border-white/10 focus:border-blue-400/50"
               placeholder="Say something..." value={chatInput}
@@ -1326,6 +1366,44 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
               {EMOTES.map(e => (
                 <button key={e.emoji} onClick={() => sendEmote(e)} title={e.label} className="text-xl p-1 rounded-lg hover:bg-white/10 transition-colors">{e.emoji}</button>
               ))}
+            </div>
+          )}
+          {showMoodPicker && (
+            <div className="pt-1">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5">Set your mood</div>
+              <div className="flex flex-wrap gap-1">
+                {MOODS.map(m => (
+                  <button
+                    key={m.emoji}
+                    onClick={() => {
+                      const newMood = myMood === m.emoji ? null : m.emoji;
+                      setMyMood(newMood);
+                      updatePlayerState(controlledMemberId, { mood: newMood });
+                      setShowMoodPicker(false);
+                    }}
+                    title={m.label}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-all hover:scale-105"
+                    style={{
+                      background: myMood === m.emoji ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.06)',
+                      border: myMood === m.emoji ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                    }}>
+                    <span className="text-base">{m.emoji}</span>
+                    <span className="text-gray-300 hidden sm:inline">{m.label}</span>
+                  </button>
+                ))}
+                {myMood && (
+                  <button
+                    onClick={() => {
+                      setMyMood(null);
+                      updatePlayerState(controlledMemberId, { mood: null });
+                      setShowMoodPicker(false);
+                    }}
+                    className="px-2 py-1 rounded-lg text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    ✕ Clear
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
