@@ -271,6 +271,14 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
                               {weeklyChamp?.memberId === m.id && (
                                 <span title={`Weekly XP Champion (+${weeklyChamp.gain} XP this week)`} className="text-sm leading-none">👑</span>
                               )}
+                              {(m.loginStreak ?? 0) >= 2 && (
+                                <span
+                                  title={`${m.loginStreak}-day login streak!`}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black"
+                                  style={{ background: 'rgba(251,146,60,0.15)', border: '1px solid rgba(251,146,60,0.35)', color: '#fb923c' }}>
+                                  🔥{m.loginStreak}
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] text-gray-500">{m.role}</div>
                           </div>
