@@ -83,7 +83,7 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [wisdomLoading, setWisdomLoading] = useState(false);
 
-  const ORACLE_KEY = (import.meta.env.VITE_ORACLE_KEY as string) ?? '';
+  const ORACLE_KEY = (window as any).__DOME_ENV__?.ORACLE_KEY || (import.meta.env.VITE_ORACLE_KEY as string) || '';
 
   // ── Particles ───────────────────────────────────────────────────────────────
   const initParticles = useCallback((w: number, h: number) => {
@@ -186,8 +186,10 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   // Filter out raw question log entries and deduplicate by title
   const seenTitles = new Set<string>();
   const cleanedWisdom = wisdomEntries.filter(e => {
+    // Filter out raw question log entries (the insight field contains the prefix)
+    if ((e.insight || '').startsWith('[User Question from DOME Oracle]')) return false;
+    // Deduplicate by title
     const title = e.title || '';
-    if (title.startsWith('[User Question from DOME Oracle]')) return false;
     if (seenTitles.has(title)) return false;
     seenTitles.add(title);
     return true;
