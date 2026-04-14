@@ -183,10 +183,20 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   };
 
   // ── Derived browse data ─────────────────────────────────────────────────────
-  const allTypes = ['all', ...Array.from(new Set(wisdomEntries.map(e => e.insight_type || 'insight').filter(Boolean)))];
+  // Filter out raw question log entries and deduplicate by title
+  const seenTitles = new Set<string>();
+  const cleanedWisdom = wisdomEntries.filter(e => {
+    const title = e.title || '';
+    if (title.startsWith('[User Question from DOME Oracle]')) return false;
+    if (seenTitles.has(title)) return false;
+    seenTitles.add(title);
+    return true;
+  });
+
+  const allTypes = ['all', ...Array.from(new Set(cleanedWisdom.map(e => e.insight_type || 'insight').filter(Boolean)))];
   const filteredWisdom = wisdomFilter === 'all'
-    ? wisdomEntries
-    : wisdomEntries.filter(e => (e.insight_type || '') === wisdomFilter);
+    ? cleanedWisdom
+    : cleanedWisdom.filter(e => (e.insight_type || '') === wisdomFilter);
 
   const STATE_LABEL: Record<OracleState, string> = { idle: 'DORMANT', thinking: 'CHANNELING', answering: 'ORACLE SPEAKS' };
   const STATE_COLOR: Record<OracleState, string> = { idle: '#374151', thinking: '#60a5fa', answering: '#fbbf24' };
@@ -210,7 +220,7 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
               style={view === v
                 ? { background: 'rgba(99,102,241,0.3)', color: '#e0e7ff', border: '1px solid rgba(99,102,241,0.4)' }
                 : { color: '#4b5563', border: '1px solid transparent' }}>
-              {v === 'oracle' ? '✦ Oracle' : `◈ Wisdom Log${wisdomEntries.length > 0 ? ` (${wisdomEntries.length})` : ''}`}
+              {v === 'oracle' ? '✦ Oracle' : `◈ Wisdom Log${cleanedWisdom.length > 0 ? ` (${cleanedWisdom.length})` : ''}`}
             </button>
           ))}
         </div>
