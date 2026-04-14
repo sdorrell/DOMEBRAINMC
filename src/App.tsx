@@ -10,6 +10,7 @@ import BattleModal from './components/BattleModal';
 import ProjectsView from './components/ProjectsView';
 import UpdateRequests from './components/UpdateRequests';
 import AdminPanel from './components/AdminPanel';
+import WisdomOracle from './components/WisdomOracle';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
 import { TEAM_MEMBERS, getLevelTier, ZONES } from './data/gameData';
@@ -30,7 +31,7 @@ import {
 import type { Zone, TeamMember } from './types';
 import './index.css';
 
-type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'battles' | 'requests' | 'admin';
+type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'battles' | 'requests' | 'admin' | 'wisdom';
 
 export default function App() {
   const [loggedInId, setLoggedInId] = useState<string | null>(() => {
@@ -604,6 +605,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     { id: 'leaderboard', label: 'Leaderboard', emoji: '🏆' },
     { id: 'battles', label: 'Battles', emoji: '⚔️' },
     { id: 'requests', label: 'Requests', emoji: '📬' },
+    { id: 'wisdom', label: 'Oracle', emoji: '✦' },
     ...(isScott ? [{ id: 'admin' as Tab, label: 'Upgrades', emoji: '⚡', adminOnly: true }] : []),
   ];
 
@@ -738,6 +740,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           />
         )}
         {tab === 'requests' && <UpdateRequests currentUserId={controlledMemberId} />}
+        {tab === 'wisdom' && <WisdomOracle currentUserId={controlledMemberId} />}
         {tab === 'admin' && isScott && <AdminPanel currentUserId={controlledMemberId} />}
       </main>
 
