@@ -27,6 +27,7 @@ import {
   setConfig,
   sendChatMessage,
   updateLoginStreak,
+  addXp,
 } from './lib/supabase';
 import type { Zone, TeamMember } from './types';
 import './index.css';
@@ -549,37 +550,81 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     "Speed of follow-up matters more than the offer",
   ];
 
+  // Track last zone visit to prevent XP farming (30s cooldown per zone)
+  const lastZoneVisitRef = useRef<Record<string, number>>({});
+
   const handleZoneAction = (zone: Zone) => {
+    const now = Date.now();
+    const lastVisit = lastZoneVisitRef.current[zone.id] || 0;
+    const COOLDOWN_MS = 30_000; // 30s per zone
+    const canEarnXp = now - lastVisit > COOLDOWN_MS;
+
     switch (zone.id) {
       case 'green_couch':
         setDomeMeetingOpen(true);
         break;
       case 'grind_zone':
         setTab('dashboard');
-        showToast('Entering the Grind Zone 💪', '📊', '#43a047');
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 10, '📊 Entered the Grind Zone');
+          showToast('+10 XP — grinding 💪', '📊', '#43a047');
+        } else {
+          showToast('Grind Zone ↗ Dashboard', '📊', '#43a047');
+        }
         break;
       case 'idea_lab':
         setTab('ideas');
-        showToast('Welcome to the Idea Lab 🧪', '💡', '#8e24aa');
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 10, '💡 Visited the Idea Lab');
+          showToast('+10 XP — ideas are worth XP 💡', '💡', '#8e24aa');
+        } else {
+          showToast('Idea Lab ↗ Ideas Board', '💡', '#8e24aa');
+        }
         break;
       case 'war_room':
         setTab('projects');
-        showToast('Into the War Room 🗺️', '⚔️', '#e64a19');
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 10, '⚔️ Entered the War Room');
+          showToast('+10 XP — strategy pays ⚔️', '⚔️', '#e64a19');
+        } else {
+          showToast('War Room ↗ Projects', '⚔️', '#e64a19');
+        }
         break;
       case 'coffee_corner': {
-        showToast('+5 XP from the coffee corner ☕', '⚡', '#8d6e63');
-        handleSendChat(`☕ grabbed a coffee and feels energized! (+5 XP)`);
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 5, '☕ Coffee corner energy boost');
+          showToast('+5 XP — caffeinated ☕', '⚡', '#8d6e63');
+          handleSendChat(`☕ grabbed a coffee and feels energized! (+5 XP)`);
+        } else {
+          showToast('Coffee Corner — come back later ☕', '☕', '#8d6e63');
+        }
         break;
       }
       case 'watercooler': {
         const take = RANDOM_HOT_TAKES[Math.floor(Math.random() * RANDOM_HOT_TAKES.length)];
         handleSendChat(`💧 Hot Take: "${take}"`);
-        showToast('Hot take dropped at the watercooler 💧', '🗣️', '#0288d1');
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 5, '💧 Dropped a hot take at the watercooler');
+          showToast('+5 XP — hot take dropped 💧', '🗣️', '#0288d1');
+        } else {
+          showToast('Hot take fired 💧', '🗣️', '#0288d1');
+        }
         break;
       }
       case 'trophy_wall':
         setTab('leaderboard');
-        showToast('Checking the Trophy Wall 🏆', '🏆', '#f9a825');
+        if (canEarnXp) {
+          lastZoneVisitRef.current[zone.id] = now;
+          addXp(controlledMemberId, 5, '🏆 Checked the Trophy Wall');
+          showToast('+5 XP — champions study the wall 🏆', '🏆', '#f9a825');
+        } else {
+          showToast('Trophy Wall ↗ Leaderboard', '🏆', '#f9a825');
+        }
         break;
     }
   };
