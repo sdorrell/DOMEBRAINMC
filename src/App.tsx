@@ -67,22 +67,6 @@ function ChallengeNotification({
   onAccept: () => void;
   onDecline: () => void;
 }) {
-  const [timeLeft, setTimeLeft] = useState('');
-
-  useEffect(() => {
-    const update = () => {
-      const diff = new Date(challenge.expires_at).getTime() - Date.now();
-      if (diff <= 0) { setTimeLeft('EXPIRED'); return; }
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      setTimeLeft(`${h}h ${m}m ${s}s`);
-    };
-    update();
-    const iv = setInterval(update, 1000);
-    return () => clearInterval(iv);
-  }, [challenge.expires_at]);
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
@@ -101,15 +85,6 @@ function ChallengeNotification({
         <div className="text-center">
           <div className="text-white font-black text-xl mb-1">YOU'VE BEEN CHALLENGED</div>
           <div className="text-red-400 font-bold text-lg">{challengerName} wants to fight!</div>
-        </div>
-
-        {/* Timer */}
-        <div className="flex items-center gap-2 px-4 py-2 rounded-xl"
-          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
-          <span className="text-red-400 text-sm">⏱</span>
-          <span className="text-red-300 font-mono font-bold text-sm">
-            {timeLeft === 'EXPIRED' ? '⚠️ EXPIRED' : `Expires in ${timeLeft}`}
-          </span>
         </div>
 
         <div className="text-gray-400 text-xs text-center leading-relaxed">
@@ -159,7 +134,7 @@ function ChallengeSentBanner({ targetName, onDismiss }: { targetName: string; on
       <span className="text-xl">⚔️</span>
       <div>
         <div className="font-black">Challenge Sent!</div>
-        <div className="text-gray-400 text-xs">{targetName} has 24 hours to accept.</div>
+        <div className="text-gray-400 text-xs">Waiting for {targetName} to respond...</div>
       </div>
       <button onClick={onDismiss} className="ml-2 text-gray-500 hover:text-gray-300 text-lg leading-none">×</button>
     </div>
@@ -315,28 +290,22 @@ function ChallengesInbox({
   liveMembers,
   onAccept,
   onDecline,
+  onChallenge,
 }: {
   currentUserId: string;
   incoming: DBBattleChallenge[];
   liveMembers: import('./types').TeamMember[];
   onAccept: (c: DBBattleChallenge) => void;
   onDecline: (c: DBBattleChallenge) => void;
+  onChallenge: (targetId: string) => void;
 }) {
   const [outgoing, setOutgoing] = useState<DBBattleChallenge[]>([]);
   useEffect(() => {
     fetchOutgoingChallenges(currentUserId).then(setOutgoing);
-  }, [currentUserId]);
+  }, [currentUserId, incoming]); // refresh when incoming changes
 
   const getMember = (id: string) =>
     liveMembers.find(m => m.id === id) || TEAM_MEMBERS.find(m => m.id === id);
-
-  function timeLeft(expiresAt: string) {
-    const diff = new Date(expiresAt).getTime() - Date.now();
-    if (diff <= 0) return 'Expired';
-    const h = Math.floor(diff / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    return h > 0 ? `${h}h ${m}m left` : `${m}m left`;
-  }
 
   function timeAgo(iso: string) {
     const diff = Date.now() - new Date(iso).getTime();
@@ -356,11 +325,7 @@ function ChallengesInbox({
           <div className="text-sm font-bold text-white">
             {type === 'incoming' ? `${other?.name ?? 'Someone'} challenged you!` : `Challenged ${other?.name ?? 'someone'}`}
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
-            <span>Sent {timeAgo(c.created_at)}</span>
-            <span>·</span>
-            <span style={{ color: type === 'incoming' ? '#f87171' : '#a78bfa' }}>{timeLeft(c.expires_at)}</span>
-          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5">Sent {timeAgo(c.created_at)}</div>
         </div>
         {type === 'incoming' && (
           <div className="flex gap-2 shrink-0">
@@ -379,30 +344,64 @@ function ChallengesInbox({
         {type === 'outgoing' && (
           <div className="shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold text-yellow-400/70"
             style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
-            Awaiting...
+            Awaiting response...
           </div>
         )}
       </div>
     );
   };
 
-  const hasAny = incoming.length > 0 || outgoing.length > 0;
+  // Online teammates (excluding self)
+  const onlineTeammates = liveMembers.filter(
+    m => m.id !== currentUserId && m.status !== 'offline'
+  );
 
   return (
-    <div className="flex flex-col gap-5 h-full overflow-y-auto">
+    <div className="flex flex-col gap-6 h-full overflow-y-auto pr-1">
       <div>
-        <h2 className="text-lg font-bold text-white">⚔️ Battle Challenges</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Incoming and outgoing pending challenge requests.</p>
+        <h2 className="text-lg font-bold text-white">⚔️ Battles</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Challenge a teammate to a trivia duel. Winner takes coins.</p>
       </div>
 
-      {!hasAny && (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-          <div className="text-5xl opacity-30">⚔️</div>
-          <div className="text-gray-500 text-sm">No active challenges right now.</div>
-          <div className="text-gray-600 text-xs">Walk up to a teammate on the World Map to challenge them!</div>
-        </div>
-      )}
+      {/* ── Quick Challenge — online now ── */}
+      <div className="rounded-xl p-4 flex flex-col gap-3"
+        style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <div className="text-[10px] font-bold uppercase tracking-widest text-red-400/80">⚡ Challenge Someone Now</div>
+        {onlineTeammates.length === 0 ? (
+          <div className="text-xs text-gray-500">No teammates online right now.</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {onlineTeammates.map(m => {
+              const alreadyChallenged = outgoing.some(c => c.defender_id === m.id);
+              return (
+                <div key={m.id} className="flex items-center gap-3 p-2.5 rounded-lg"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0"
+                    style={{ background: m.avatarColor }}>{m.name[0]}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-white">{m.name}</div>
+                    <div className="text-[10px] text-gray-500">Lv{m.level} · {m.battleWins ?? 0}W {m.battleLosses ?? 0}L</div>
+                  </div>
+                  <button
+                    disabled={alreadyChallenged}
+                    onClick={() => onChallenge(m.id)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{
+                      background: alreadyChallenged ? 'rgba(245,158,11,0.15)' : 'linear-gradient(135deg, #ef4444, #b91c1c)',
+                      color: alreadyChallenged ? '#f59e0b' : 'white',
+                      border: 'none',
+                      boxShadow: alreadyChallenged ? 'none' : '0 0 10px rgba(239,68,68,0.4)',
+                    }}>
+                    {alreadyChallenged ? '⏳ Pending' : '⚔️ Challenge'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
+      {/* ── Incoming challenges ── */}
       {incoming.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="text-[10px] font-bold uppercase tracking-widest text-red-400/70">
@@ -412,12 +411,21 @@ function ChallengesInbox({
         </div>
       )}
 
+      {/* ── Outgoing challenges ── */}
       {outgoing.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-400/70">
-            Outgoing ({outgoing.length})
+            Sent ({outgoing.length})
           </div>
           {outgoing.map(c => <ChallengeCard key={c.id} c={c} type="outgoing" />)}
+        </div>
+      )}
+
+      {incoming.length === 0 && outgoing.length === 0 && onlineTeammates.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+          <div className="text-5xl opacity-20">⚔️</div>
+          <div className="text-gray-500 text-sm">Nobody online right now.</div>
+          <div className="text-gray-600 text-xs">Come back when the team is active to start a battle.</div>
         </div>
       )}
     </div>
@@ -644,7 +652,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     const result = await sendBattleChallenge(controlledMemberId, targetId);
     if (result) {
       setChallengeSentTarget(target?.name || targetId);
-      await sendChat(`challenged ${target?.name || targetId} to battle ⚔️ — they have 24 hours to accept!`);
+      await sendChat(`challenged ${target?.name || targetId} to battle ⚔️`);
     } else {
       showToast('Failed to send challenge', '❌', '#ef4444');
     }
@@ -840,6 +848,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
             liveMembers={liveMembers}
             onAccept={handleAcceptChallenge}
             onDecline={handleDeclineChallenge}
+            onChallenge={handleChallenge}
           />
         )}
         {tab === 'requests' && <UpdateRequests currentUserId={controlledMemberId} />}
