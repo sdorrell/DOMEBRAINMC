@@ -484,6 +484,21 @@ function drawPolyAvatar(
   const bx = sx;
   const by = sy + TH / 2 + bob;
 
+  // ── Aura (cosmetic) — drawn BEHIND everything so it glows around the character
+  if (cosmetics?.aura) {
+    const auraColor = COSMETIC_ITEMS.find(i => i.id === cosmetics.aura)?.color || '#ffd600';
+    const pulse = 0.5 + Math.sin(tick * 0.08) * 0.15;  // 0.35–0.65 — clearly visible
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    const grad = ctx.createRadialGradient(bx, by - 16, 6, bx, by - 16, 44);
+    grad.addColorStop(0, auraColor + 'ff');
+    grad.addColorStop(0.5, auraColor + '88');
+    grad.addColorStop(1, auraColor + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(bx, by - 16, 44, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // ── Shadow ellipse
   ctx.save(); ctx.globalAlpha *= 0.3;
   ctx.beginPath(); ctx.ellipse(bx, by + 2, 12, 5, 0, 0, Math.PI*2);
@@ -523,20 +538,6 @@ function drawPolyAvatar(
   // Belt
   ctx.fillStyle = '#3e2723';
   ctx.fillRect(bx - 10, bodyTop + 13, 20, 3);
-
-  // ── Aura (cosmetic)
-  if (cosmetics?.aura) {
-    const auraColor = COSMETIC_ITEMS.find(i => i.id === cosmetics.aura)?.color || '#ffd600';
-    const pulse = 0.15 + Math.sin(tick * 0.08) * 0.06;
-    ctx.save();
-    ctx.globalAlpha = pulse;
-    const grad = ctx.createRadialGradient(bx, by - 14, 8, bx, by - 14, 28);
-    grad.addColorStop(0, auraColor + 'ff');
-    grad.addColorStop(1, auraColor + '00');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(bx, by - 14, 28, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-  }
 
   // ── Cape
   if (tier.cape || cosmetics?.capeColor) {
