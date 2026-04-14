@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   WORLD_COLS, WORLD_ROWS,
-  ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier,
+  ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier, WORK_LOGS,
 } from '../data/gameData';
 import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, updatePlayerState, type DBWorldRequest } from '../lib/supabase';
 import type { TeamMember, Zone, Emote } from '../types';
@@ -1197,6 +1197,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
           {/* Hover card */}
           {hoveredMember && hoveredMember.id !== controlledMemberId && (() => {
             const tier = getLevelTier(hoveredMember.level);
+            const brainScore = WORK_LOGS.filter(l => l.authorId === hoveredMember.id).length;
             return (
               <div className="absolute top-3 left-3 p-3 rounded-xl pointer-events-none"
                 style={{ background:'rgba(0,10,30,0.88)', border:`2px solid ${hoveredMember.avatarColor}77`, backdropFilter:'blur(8px)', minWidth:168 }}>
@@ -1204,6 +1205,12 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
                 <div className="text-xs text-gray-400 mt-0.5">{hoveredMember.role}</div>
                 <div className="text-xs mt-1.5 font-bold" style={{ color: tier.color }}>Lv{hoveredMember.level} {tier.title}</div>
                 <div className="text-xs text-gray-400">{hoveredMember.xp.toLocaleString()} XP</div>
+                <div className="text-xs mt-1 flex items-center gap-1">
+                  <span>🧠</span>
+                  <span style={{ color: brainScore > 0 ? '#a78bfa' : '#6b7280' }}>
+                    Brain Score: <span className="font-bold">{brainScore}</span>
+                  </span>
+                </div>
                 <div className="flex flex-wrap gap-0.5 mt-1.5">
                   {hoveredMember.badges.slice(0,5).map(b => <span key={b} className="text-base">{BADGE_EMOJI[b]||'🎖️'}</span>)}
                 </div>

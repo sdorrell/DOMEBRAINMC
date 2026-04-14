@@ -18,7 +18,7 @@ function mapDbIdea(db: DBIdea): Idea {
   };
 }
 
-type SortMode = 'votes' | 'newest' | 'status';
+type SortMode = 'votes' | 'newest' | 'status' | 'author';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed';
 
 const STATUS_CONFIG = {
@@ -41,6 +41,7 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortMode>('votes');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchIdeas().then(data => {
@@ -55,11 +56,24 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
   const [newTags, setNewTags] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const filtered = ideas.filter(i => statusFilter === 'all' || i.status === statusFilter);
+  const filtered = ideas.filter(i => {
+    if (statusFilter !== 'all' && i.status !== statusFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const authorName = TEAM_MEMBERS.find(m => m.id === i.authorId)?.name.toLowerCase() || '';
+      if (!i.title.toLowerCase().includes(q) && !i.description.toLowerCase().includes(q) && !authorName.includes(q)) return false;
+    }
+    return true;
+  });
   const sorted = [...filtered].sort((a, b) => {
     if (sort === 'votes') return b.upvotes.length - a.upvotes.length;
     if (sort === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     if (sort === 'status') return a.status.localeCompare(b.status);
+    if (sort === 'author') {
+      const nameA = TEAM_MEMBERS.find(m => m.id === a.authorId)?.name || a.authorId;
+      const nameB = TEAM_MEMBERS.find(m => m.id === b.authorId)?.name || b.authorId;
+      return nameA.localeCompare(nameB);
+    }
     return 0;
   });
 
@@ -124,6 +138,15 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
           <p className="text-[10px] text-indigo-400 mt-0.5">⚡ +5 XP per upvote · +75 XP to authors whose idea hits 5 votes</p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* Search bar */}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search ideas..."
+            className="text-xs px-3 py-1 rounded-lg bg-black/40 text-gray-200 border border-white/10 outline-none focus:border-indigo-500 placeholder-gray-600"
+            style={{ minWidth: 140 }}
+          />
           {/* Status filter */}
           {(['all', 'open', 'in_progress', 'completed'] as StatusFilter[]).map(s => (
             <button
@@ -144,6 +167,7 @@ export default function IdeasBoard({ currentUserId }: { currentUserId: string })
             <option value="votes">Top Voted</option>
             <option value="newest">Newest</option>
             <option value="status">By Status</option>
+            <option value="author">By Author</option>
           </select>
           <button
             onClick={() => setShowNewIdea(v => !v)}
