@@ -30,6 +30,12 @@ interface WisdomEntry {
   run_date?: string;
 }
 
+interface ConversationTurn {
+  question: string;
+  answer: string;
+  timestamp: Date;
+}
+
 const ORACLE_BASE = 'https://domebrain-production.up.railway.app';
 const ORACLE_KEY: string = (typeof window !== 'undefined' && (window as any).__DOME_ENV__?.ORACLE_KEY) || '';
 
@@ -127,6 +133,11 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState('Seek knowledge from the DOME Oracle...');
   const [answerVisible, setAnswerVisible] = useState(false);
+
+  // Conversation state
+  const [conversation, setConversation] = useState<ConversationTurn[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
 
   // Browse state
   const [viewMode, setViewMode] = useState<ViewMode>('oracle');
@@ -310,16 +321,29 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   // ── Ask the Oracle ──────────────────────────────────────────────────────────
   const handleAsk = async () => {
     if (!question.trim() || isLoading || oracleState !== 'idle') return;
+    const asked = question.trim();
+    setQuestion('');
     setIsLoading(true); setOracleAnswer(null); setAnswerVisible(false);
     stateRef.current = 'thinking'; setOracleState('thinking');
     setStatusText('The Oracle channels the depths of DOME knowledge...');
     playThinking();
     try {
+      // Build history for Claude from prior turns
+      const history: { role: string; content: string }[] = [];
+      conversation.forEach(t => {
+        history.push({ role: 'user', content: t.question });
+        history.push({ role: 'assistant', content: t.answer });
+      });
+
       const [res] = await Promise.all([
         fetch(`${ORACLE_BASE}/oracle`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ORACLE_KEY}` },
-          body: JSON.stringify({ question: question.trim() }),
+          body: JSON.stringify({
+            question: asked,
+            history,
+            session_id: sessionId ?? undefined,
+          }),
         }),
         new Promise(r => setTimeout(r, 3000)),
       ]);
@@ -327,15 +351,19 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `Oracle server error ${res.status}`);
       }
-      const { answer } = await res.json();
+      const { answer, session_id } = await res.json();
       stopThinking(); playAnswer();
       stateRef.current = 'answering'; setOracleState('answering');
       setStatusText('The Oracle has spoken.');
       setOracleAnswer(answer);
-      setTimeout(() => setAnswerVisible(true), 600);
+      if (session_id && !sessionId) setSessionId(session_id);
+      // Append to conversation thread
+      const turn: ConversationTurn = { question: asked, answer, timestamp: new Date() };
+      setConversation(prev => [...prev, turn]);
+      setTimeout(() => setAnswerVisible(true), 400);
       setTimeout(() => {
         stateRef.current = 'idle'; setOracleState('idle');
-        setStatusText('Seek knowledge from the DOME Oracle...');
+        setStatusText('Continue the conversation or ask something new...');
         setAnswerVisible(false);
         setTimeout(() => setOracleAnswer(null), 800);
       }, 18000);
@@ -346,6 +374,23 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
       setIsLoading(false);
     }
   };
+
+  // ── New conversation ────────────────────────────────────────────────────────
+  const handleNewConversation = () => {
+    setConversation([]);
+    setSessionId(null);
+    setOracleAnswer(null);
+    setAnswerVisible(false);
+    stateRef.current = 'idle'; setOracleState('idle');
+    setStatusText('Seek knowledge from the DOME Oracle...');
+  };
+
+  // ── Auto-scroll to latest answer ─────────────────────────────────────────
+  useEffect(() => {
+    if (conversation.length > 0) {
+      setTimeout(() => conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }), 100);
+    }
+  }, [conversation.length]);
 
   // ── Derived browse data ─────────────────────────────────────────────────────
   const filteredEntries = wisdomFilter === TYPE_ALL
@@ -536,37 +581,78 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
       {/* ── ORACLE VIEW ──────────────────────────────────────────────────────── */}
       {viewMode === 'oracle' && (
         <>
-          <div className="relative flex-1 min-h-0">
+          {/* Canvas: shrinks when conversation is active */}
+          <div className="relative shrink-0 transition-all duration-500" style={{ height: conversation.length > 0 ? '90px' : 'auto', flex: conversation.length > 0 ? 'none' : '1 1 0%', minHeight: 0 }}>
             <canvas ref={canvasRef} className="w-full h-full block" />
-
-            {oracleState === 'idle' && (
+            {oracleState === 'idle' && conversation.length === 0 && (
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ paddingBottom: '8%' }}>
                 <div className="text-[11px] tracking-[0.35em] font-bold" style={{ color: 'rgba(75,85,99,0.8)', textShadow: '0 0 20px rgba(99,102,241,0.2)' }}>
                   ✦ DOME WISDOM ORACLE ✦
                 </div>
               </div>
             )}
-
             {oracleState === 'thinking' && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-                <div className="text-[11px] tracking-[0.3em] font-bold px-4 py-1.5 rounded-full" style={{ color: '#60a5fa', background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(96,165,250,0.2)', animation: 'pulse 1.2s ease-in-out infinite alternate' }}>
-                  CHANNELING DOME KNOWLEDGE...
-                </div>
-              </div>
-            )}
-
-            {oracleAnswer && answerVisible && (
-              <div className="absolute bottom-4 left-0 right-0 px-4 flex justify-center" style={{ opacity: answerVisible ? 1 : 0, transition: 'opacity 0.8s ease' }}>
-                <div className="w-full max-w-2xl rounded-2xl p-5 space-y-3" style={{ background: 'rgba(0,0,0,0.92)', border: '1px solid rgba(251,191,36,0.4)', boxShadow: '0 0 40px rgba(251,191,36,0.12), 0 0 80px rgba(251,191,36,0.05)' }}>
-                  <div className="text-[10px] tracking-[0.4em] font-bold" style={{ color: '#fbbf24' }}>◈ THE ORACLE SPEAKS ◈</div>
-                  <div className="text-sm leading-relaxed" style={{ color: '#d1d5db' }}>{oracleAnswer}</div>
-                  <div className="text-[10px] pt-1" style={{ color: 'rgba(251,191,36,0.35)' }}>
-                    This wisdom has been drawn from the DOME Brain. Your question will inform tomorrow's synthesis.
-                  </div>
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none">
+                <div className="text-[10px] tracking-[0.3em] font-bold px-3 py-1 rounded-full" style={{ color: '#60a5fa', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(96,165,250,0.2)', animation: 'pulse 1.2s ease-in-out infinite alternate' }}>
+                  CHANNELING...
                 </div>
               </div>
             )}
           </div>
+
+          {/* ── Conversation thread ──────────────────────────────────────────── */}
+          {conversation.length > 0 && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(99,102,241,0.3) transparent' }}>
+              {conversation.map((turn, i) => (
+                <div key={i} className="space-y-2">
+                  {/* User question */}
+                  <div className="flex justify-end">
+                    <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm"
+                      style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)', color: '#c7d2fe' }}>
+                      {turn.question}
+                    </div>
+                  </div>
+                  {/* Oracle answer */}
+                  <div className="flex justify-start">
+                    <div className="max-w-[88%] space-y-1.5">
+                      <div className="text-[9px] tracking-[0.3em] font-bold" style={{ color: 'rgba(251,191,36,0.5)' }}>◈ ORACLE</div>
+                      <div className="px-4 py-3 rounded-2xl rounded-tl-sm text-sm leading-relaxed"
+                        style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(251,191,36,0.2)', color: '#d1d5db', boxShadow: '0 0 20px rgba(251,191,36,0.04)' }}>
+                        {turn.answer}
+                      </div>
+                      <div className="text-[9px] text-gray-700 pl-1">
+                        {turn.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {/* Latest streaming answer while thinking/answering */}
+              {oracleState === 'answering' && oracleAnswer && answerVisible && (
+                <div className="flex justify-start">
+                  <div className="max-w-[88%] space-y-1.5">
+                    <div className="text-[9px] tracking-[0.3em] font-bold" style={{ color: 'rgba(251,191,36,0.5)' }}>◈ ORACLE</div>
+                    <div className="px-4 py-3 rounded-2xl rounded-tl-sm text-sm leading-relaxed"
+                      style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(251,191,36,0.35)', color: '#d1d5db', boxShadow: '0 0 30px rgba(251,191,36,0.08)', opacity: answerVisible ? 1 : 0, transition: 'opacity 0.6s ease' }}>
+                      {oracleAnswer}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={conversationEndRef} />
+            </div>
+          )}
+
+          {/* First-ask answer overlay (no history yet) */}
+          {conversation.length === 0 && oracleAnswer && answerVisible && (
+            <div className="shrink-0 px-4 pb-2 flex justify-center" style={{ opacity: answerVisible ? 1 : 0, transition: 'opacity 0.8s ease' }}>
+              <div className="w-full max-w-2xl rounded-2xl p-5 space-y-3" style={{ background: 'rgba(0,0,0,0.92)', border: '1px solid rgba(251,191,36,0.4)', boxShadow: '0 0 40px rgba(251,191,36,0.12)' }}>
+                <div className="text-[10px] tracking-[0.4em] font-bold" style={{ color: '#fbbf24' }}>◈ THE ORACLE SPEAKS ◈</div>
+                <div className="text-sm leading-relaxed" style={{ color: '#d1d5db' }}>{oracleAnswer}</div>
+              </div>
+            </div>
+          )}
 
           {/* ── Input area ───────────────────────────────────────────────────── */}
           <div className="shrink-0 p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
@@ -576,31 +662,44 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
                   value={question}
                   onChange={e => setQuestion(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAsk(); } }}
-                  placeholder="What do you seek from the DOME Oracle?"
+                  placeholder={conversation.length > 0 ? 'Continue the conversation...' : 'What do you seek from the DOME Oracle?'}
                   rows={2}
                   disabled={isLoading || oracleState !== 'idle'}
                   className="w-full resize-none rounded-xl px-4 py-3 text-sm placeholder-gray-700 outline-none transition-all"
                   style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${oracleState !== 'idle' ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.09)'}`, color: '#e2e8f0', lineHeight: '1.5' }}
                 />
               </div>
-              <button
-                onClick={handleAsk}
-                disabled={!question.trim() || isLoading || oracleState !== 'idle'}
-                className="shrink-0 flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all"
-                style={{
-                  background: question.trim() && oracleState === 'idle' ? 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' : 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  color: question.trim() && oracleState === 'idle' ? '#e0e7ff' : '#374151',
-                  boxShadow: question.trim() && oracleState === 'idle' ? '0 0 24px rgba(99,102,241,0.45)' : 'none',
-                  cursor: question.trim() && oracleState === 'idle' ? 'pointer' : 'not-allowed',
-                }}
-              >
-                <span style={{ fontSize: '14px' }}>{oracleState === 'thinking' ? '⟳' : '✦'}</span>
-                <span>{oracleState === 'thinking' ? 'Channeling...' : oracleState === 'answering' ? 'Speaking...' : 'Ask'}</span>
-              </button>
+              <div className="flex flex-col gap-2 shrink-0">
+                <button
+                  onClick={handleAsk}
+                  disabled={!question.trim() || isLoading || oracleState !== 'idle'}
+                  className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all"
+                  style={{
+                    background: question.trim() && oracleState === 'idle' ? 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' : 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: question.trim() && oracleState === 'idle' ? '#e0e7ff' : '#374151',
+                    boxShadow: question.trim() && oracleState === 'idle' ? '0 0 24px rgba(99,102,241,0.45)' : 'none',
+                    cursor: question.trim() && oracleState === 'idle' ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <span style={{ fontSize: '14px' }}>{oracleState === 'thinking' ? '⟳' : '✦'}</span>
+                  <span>{oracleState === 'thinking' ? 'Channeling...' : oracleState === 'answering' ? 'Speaking...' : 'Ask'}</span>
+                </button>
+                {conversation.length > 0 && (
+                  <button
+                    onClick={handleNewConversation}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#4b5563' }}
+                  >
+                    ↺ New
+                  </button>
+                )}
+              </div>
             </div>
             <p className="text-center text-[10px] text-gray-700 mt-2">
-              Oracle queries all 7 DOME databases live · Questions are logged for nightly synthesis · Press Enter to ask
+              {conversation.length > 0
+                ? `Session active · ${conversation.length} exchange${conversation.length > 1 ? 's' : ''} · Stored in DOME Brain`
+                : 'Oracle queries all 7 DOME databases live · Sessions stored in DOME Brain · Press Enter to ask'}
             </p>
           </div>
         </>
