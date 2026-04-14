@@ -91,14 +91,24 @@ export function useSupabaseSync(controlledMemberId: string) {
   useEffect(() => {
     const sub = subscribeToChat((msg: DBChatMessage) => {
       setChatMessages(prev => {
-        // Avoid duplicates (we optimistically add on send)
+        // Avoid exact-id duplicates
         if (prev.some(m => m.id === msg.id)) return prev;
-        return [...prev, {
+        const realMsg = {
           id: msg.id,
           authorId: msg.author_id,
           text: msg.text,
           createdAt: new Date(msg.created_at).getTime(),
-        }];
+        };
+        // Replace any matching optimistic temp message (same author + text)
+        const tempIdx = prev.findIndex(
+          m => m.id.startsWith('temp_') && m.authorId === msg.author_id && m.text === msg.text
+        );
+        if (tempIdx !== -1) {
+          const next = [...prev];
+          next[tempIdx] = realMsg;
+          return next;
+        }
+        return [...prev, realMsg];
       });
     });
     return () => { sub.unsubscribe(); };

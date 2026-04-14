@@ -89,19 +89,19 @@ function _soundEnabled(): boolean {
   try { return localStorage.getItem('dome_battle_sound') !== 'off'; } catch { return true; }
 }
 
-function _getAudioCtx(): AudioContext | null {
+async function _getAudioCtx(): Promise<AudioContext | null> {
   try {
     const w = window as typeof window & { __domeAudioCtx?: AudioContext };
     if (!w.__domeAudioCtx) w.__domeAudioCtx = new AudioContext();
-    if (w.__domeAudioCtx.state === 'suspended') w.__domeAudioCtx.resume();
+    if (w.__domeAudioCtx.state === 'suspended') await w.__domeAudioCtx.resume();
     return w.__domeAudioCtx;
   } catch { return null; }
 }
 
-function _tone(freq: number, type: OscillatorType, dur: number, vol = 0.22, delay = 0): void {
+async function _tone(freq: number, type: OscillatorType, dur: number, vol = 0.22, delay = 0): Promise<void> {
   try {
-    const ctx = _getAudioCtx();
-    if (!ctx) return;
+    const ctx = await _getAudioCtx();
+    if (!ctx || ctx.state !== 'running') return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -126,6 +126,25 @@ function playDefeatJingle(): void {
   if (!_soundEnabled()) return;
   const notes: [number, number][] = [[440, 0], [349, 0.18], [294, 0.36], [220, 0.54]];
   notes.forEach(([f, d]) => _tone(f, 'sawtooth', 0.32, 0.18, d));
+}
+
+function playHitSound(isCrit: boolean): void {
+  if (!_soundEnabled()) return;
+  if (isCrit) {
+    _tone(220, 'sawtooth', 0.08, 0.3);
+    _tone(440, 'square', 0.12, 0.25, 0.05);
+  } else {
+    _tone(180, 'sawtooth', 0.1, 0.2);
+  }
+}
+
+function playAbilitySound(id: string): void {
+  if (!_soundEnabled()) return;
+  if (id === 'ult')    { _tone(880, 'square', 0.15, 0.3); _tone(1047, 'square', 0.2, 0.3, 0.1); }
+  else if (id === 'freeze') { _tone(1200, 'sine', 0.3, 0.18); }
+  else if (id === 'shield') { _tone(523, 'sine', 0.25, 0.18); }
+  else if (id === 'boost')  { _tone(659, 'triangle', 0.2, 0.2); _tone(784, 'triangle', 0.2, 0.2, 0.1); }
+  else { _tone(300, 'square', 0.08, 0.18); }
 }
 
 function getLine(key: string, vars: Record<string, string | number>): string {
@@ -258,6 +277,8 @@ export default function BattleModal({ player, enemy, onComplete, onClose }: Prop
 
   const executeAction = useCallback(async (action: BattleAction, isPlayer: boolean) => {
     setState(s => ({ ...s, phase: 'animating', playerAttacking: isPlayer, enemyAttacking: !isPlayer }));
+    // Play attack sound immediately
+    playAbilitySound(action.id);
     await new Promise(r => setTimeout(r, 280));
 
     setState(prevS => {
@@ -397,6 +418,8 @@ export default function BattleModal({ player, enemy, onComplete, onClose }: Prop
       return s;
     });
 
+    // Play hit sound at impact moment (150ms after attack starts)
+    setTimeout(() => playHitSound(action.critChance ? action.critChance > 0.15 : false), 150);
     setTimeout(() => setState(s => ({ ...s, playerHurt: false, enemyHurt: false })), 350);
   }, [player, enemy, addFloat]);
 

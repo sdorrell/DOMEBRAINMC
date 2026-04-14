@@ -301,7 +301,9 @@ function ProjectCard({ project, isExpanded, onToggle, health }: { project: Proje
               ) : null;
             })}
           </div>
-          <div className="text-[10px] text-gray-500">Due {new Date(project.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+          {project.targetDate ? (
+            <div className="text-[10px] text-gray-500">Due {new Date(project.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+          ) : null}
         </div>
       </button>
 
