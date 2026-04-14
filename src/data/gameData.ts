@@ -409,8 +409,8 @@ export const TEAM_MEMBERS: TeamMember[] = [
     battleLosses: 2,
     badges: ['pioneer', 'dome_fossil', 'first_steps', 'voter', 'spark'],
     activeBadges: [],
-    worldX: 32,
-    worldY: 21,
+    worldX: 14,
+    worldY: 15,
     status: 'online',
     lastActive: '10 mins ago',
     joinedDate: '2023-01-01',
@@ -728,20 +728,6 @@ export const ZONES: Zone[] = [
     ],
     description: 'The legendary green couch where DOME Meetings happen. Gather here.',
     action: 'Start DOME Meeting',
-  },
-  {
-    id: 'jail_cell',
-    name: 'The Jail Cell',
-    emoji: '🔒',
-    color: '#1a1a0a',
-    tiles: [
-      {x:30,y:19},{x:31,y:19},{x:32,y:19},{x:33,y:19},{x:34,y:19},
-      {x:30,y:20},{x:31,y:20},{x:32,y:20},{x:33,y:20},{x:34,y:20},
-      {x:30,y:21},{x:31,y:21},{x:32,y:21},{x:33,y:21},{x:34,y:21},
-      {x:30,y:22},{x:31,y:22},{x:32,y:22},{x:33,y:22},{x:34,y:22},
-    ],
-    description: 'Shayne\'s permanent residence. HR violations have consequences.',
-    action: 'Taunt Prisoner',
   },
 ];
 

@@ -26,7 +26,6 @@ const BIOME: Record<string, { top: string; topHL: string; wall1: string; wall2: 
   watercooler:  { top:'#0277bd', topHL:'#0288d1', wall1:'#01579b', wall2:'#014080', outline:'#002244' },
   trophy_wall:  { top:'#c47d0e', topHL:'#f9a825', wall1:'#8d5e00', wall2:'#7a5000', outline:'#3d2800' },
   green_couch:  { top:'#145214', topHL:'#2e7d2e', wall1:'#0a3d0a', wall2:'#083508', outline:'#011a01' },
-  jail_cell:    { top:'#2a2a1a', topHL:'#3a3a28', wall1:'#1a1a0e', wall2:'#141408', outline:'#0a0a04' },
 };
 
 // ─── COORDINATE MATH ──────────────────────────────────────────────────────────
@@ -449,58 +448,6 @@ function drawCouch(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1,
   ctx.fill();
   ctx.fillStyle = '#a5f3a7';
   ctx.fillText(lbl, x, tY + tH/2);
-  ctx.restore();
-}
-
-/** Jail cell bars — drawn over the zone tile area */
-function drawJailBars(ctx: CanvasRenderingContext2D, x: number, y: number, scale=1) {
-  const s = scale;
-  ctx.save();
-
-  // Stone wall backing behind bars
-  ctx.fillStyle = '#3a3a28';
-  ctx.fillRect(x - 28*s, y - 38*s, 56*s, 40*s);
-  ctx.fillStyle = '#2a2a1a';
-  ctx.fillRect(x - 26*s, y - 36*s, 52*s, 36*s);
-
-  // Bar color and shadow
-  const BAR   = '#b0b080';
-  const DARK  = '#606040';
-  const RUST  = '#7a6030';
-
-  // Vertical bars (6 bars)
-  for (let i = 0; i < 6; i++) {
-    const bx = x - 22*s + i * 9*s;
-    // Shadow
-    ctx.fillStyle = DARK;
-    ctx.fillRect(bx + 1*s, y - 36*s, 3.5*s, 34*s);
-    // Bar face
-    ctx.fillStyle = BAR;
-    ctx.fillRect(bx, y - 37*s, 3*s, 34*s);
-    // Highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.fillRect(bx, y - 37*s, 1*s, 34*s);
-    // Rust spots
-    ctx.fillStyle = RUST;
-    ctx.fillRect(bx + 0.5*s, y - 18*s, 2*s, 2*s);
-  }
-
-  // Horizontal cross-bars (2 bands)
-  for (const gy of [y - 28*s, y - 14*s]) {
-    ctx.fillStyle = DARK;
-    ctx.fillRect(x - 23*s, gy + 1*s, 48*s, 4*s);
-    ctx.fillStyle = BAR;
-    ctx.fillRect(x - 23*s, gy, 48*s, 3.5*s);
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    ctx.fillRect(x - 23*s, gy, 48*s, 1*s);
-  }
-
-  // "JAIL" text etched in stone
-  ctx.fillStyle = 'rgba(180,180,120,0.55)';
-  ctx.font = `bold ${7*s}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText('JAIL', x, y - 40*s);
-
   ctx.restore();
 }
 
@@ -1086,7 +1033,6 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
           watercooler:(c,x,y,s,t) => drawIce(c,x,y,s,t),
           trophy_wall:(c,x,y,s) => drawColumn(c,x,y,s),
           green_couch:(c,x,y,s,t) => drawCouch(c,x,y,s,t),
-          jail_cell:  (c,x,y,s) => drawJailBars(c,x,y,s),
         };
 
         const decorFn = decorators[zone.id];

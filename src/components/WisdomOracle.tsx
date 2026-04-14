@@ -1,9 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
 
 type OracleState = 'idle' | 'thinking' | 'answering';
-type ViewMode = 'oracle' | 'browse';
+type ViewMode = 'oracle' | 'history' | 'browse';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+interface OracleSession {
+  id: string;
+  question: string;
+  answer: string;
+  team_member: string | null;
+  created_at: string;
+}
 interface Particle {
   rainX: number; rainY: number; vy: number;
   targetX: number; targetY: number;
@@ -76,12 +84,16 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const [statusText, setStatusText] = useState('Seek knowledge from the DOME Oracle...');
   const [answerVisible, setAnswerVisible] = useState(false);
 
-  // Browse state
+  // Browse / history state
   const [view, setView] = useState<ViewMode>('oracle');
   const [wisdomEntries, setWisdomEntries] = useState<WisdomEntry[]>([]);
   const [wisdomFilter, setWisdomFilter] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [wisdomLoading, setWisdomLoading] = useState(false);
+  // Q&A history
+  const [sessions, setSessions] = useState<OracleSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
 
   const ORACLE_KEY = (window as any).__DOME_ENV__?.ORACLE_KEY || (import.meta.env.VITE_ORACLE_KEY as string) || '';
 
@@ -143,6 +155,20 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
 
   useEffect(() => { fetchWisdom(); }, [fetchWisdom]);
 
+  // ── Fetch Q&A session history ────────────────────────────────────────────────
+  const loadSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    const { data } = await supabase
+      .from('dome_oracle_sessions')
+      .select('id, question, answer, team_member, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (data) setSessions(data as OracleSession[]);
+    setSessionsLoading(false);
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
   // ── Audio ───────────────────────────────────────────────────────────────────
   const getCtx=()=>{ if(!audioCtxRef.current) audioCtxRef.current=new(window.AudioContext||(window as any).webkitAudioContext)(); return audioCtxRef.current; };
   const playThinking=()=>{ try{ const ctx=getCtx(); thinkOscRef.current.forEach(o=>{try{o.stop();}catch{}}); thinkOscRef.current=[]; [82.4,110,164.8,220,293.7].forEach((freq,i)=>{ const osc=ctx.createOscillator(),gain=ctx.createGain(); osc.type=i%2===0?'sine':'triangle'; osc.frequency.setValueAtTime(freq,ctx.currentTime); osc.frequency.linearRampToValueAtTime(freq*1.62,ctx.currentTime+4.5); gain.gain.setValueAtTime(0,ctx.currentTime); gain.gain.linearRampToValueAtTime(0.03,ctx.currentTime+1.0); osc.connect(gain); gain.connect(ctx.destination); osc.start(); thinkOscRef.current.push(osc); }); }catch{} };
@@ -153,6 +179,7 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const handleAsk = async () => {
     if (!question.trim() || isLoading || oracleState !== 'idle') return;
     setIsLoading(true); setAnswer(null); setAnswerVisible(false);
+    setQuestion('');
     stateRef.current = 'thinking'; setOracleState('thinking');
     setStatusText('The Oracle channels the depths of DOME knowledge...');
     playThinking();
@@ -173,12 +200,14 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
       setStatusText('The Oracle has spoken.');
       setAnswer(ans);
       setTimeout(() => setAnswerVisible(true), 600);
-      setTimeout(()=>{ stateRef.current='idle'; setOracleState('idle'); setStatusText('Seek knowledge from the DOME Oracle...'); setAnswerVisible(false); setTimeout(()=>setAnswer(null),800); }, 20000);
-      // Refresh wisdom list after question (it got stored)
-      setTimeout(fetchWisdom, 2000);
+      // Return canvas to idle after animation, keep answer panel visible
+      setTimeout(() => { stateRef.current = 'idle'; setOracleState('idle'); }, 3000);
+      // Refresh history after question
+      setTimeout(() => { fetchWisdom(); loadSessions(); }, 2000);
     } catch (err: any) {
       stopThinking(); stateRef.current='idle'; setOracleState('idle');
       setStatusText(`Oracle unreachable: ${err?.message ?? 'unknown error'}`);
+      setAnswerVisible(false);
     } finally { setIsLoading(false); }
   };
 
@@ -203,6 +232,105 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const STATE_LABEL: Record<OracleState, string> = { idle: 'DORMANT', thinking: 'CHANNELING', answering: 'ORACLE SPEAKS' };
   const STATE_COLOR: Record<OracleState, string> = { idle: '#374151', thinking: '#60a5fa', answering: '#fbbf24' };
 
+  // ── Markdown renderer ────────────────────────────────────────────────────────
+  function renderMarkdown(text: string) {
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      // Table detection — consecutive | rows
+      if (line.trim().startsWith('|')) {
+        const tableLines: string[] = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          tableLines.push(lines[i]);
+          i++;
+        }
+        const rows = tableLines.filter(l => !l.match(/^\|[\s\-|]+\|$/)); // skip separator rows
+        elements.push(
+          <div key={`tbl-${i}`} className="overflow-x-auto my-2">
+            <table className="text-xs w-full border-collapse">
+              {rows.map((row, ri) => {
+                const cells = row.split('|').filter((_, ci) => ci > 0 && ci < row.split('|').length - 1);
+                const Tag = ri === 0 ? 'th' : 'td';
+                return (
+                  <tr key={ri} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    {cells.map((cell, ci) => (
+                      <Tag key={ci} className={`px-2 py-1 text-left ${ri === 0 ? 'font-bold text-yellow-300/80' : 'text-gray-300'}`}
+                        dangerouslySetInnerHTML={{ __html: inlineFormat(cell.trim()) }} />
+                    ))}
+                  </tr>
+                );
+              })}
+            </table>
+          </div>
+        );
+        continue;
+      }
+      // Numbered list
+      if (/^\d+\.\s/.test(line.trim())) {
+        const listItems: string[] = [];
+        while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
+          listItems.push(lines[i].trim().replace(/^\d+\.\s/, ''));
+          i++;
+        }
+        elements.push(
+          <ol key={`ol-${i}`} className="list-decimal list-inside space-y-0.5 my-1 text-sm text-gray-300">
+            {listItems.map((item, li) => <li key={li} dangerouslySetInnerHTML={{ __html: inlineFormat(item) }} />)}
+          </ol>
+        );
+        continue;
+      }
+      // Bullet list
+      if (/^[-*]\s/.test(line.trim())) {
+        const listItems: string[] = [];
+        while (i < lines.length && /^[-*]\s/.test(lines[i].trim())) {
+          listItems.push(lines[i].trim().replace(/^[-*]\s/, ''));
+          i++;
+        }
+        elements.push(
+          <ul key={`ul-${i}`} className="space-y-0.5 my-1 text-sm text-gray-300">
+            {listItems.map((item, li) => (
+              <li key={li} className="flex gap-1.5">
+                <span className="text-yellow-400/60 shrink-0 mt-0.5">·</span>
+                <span dangerouslySetInnerHTML={{ __html: inlineFormat(item) }} />
+              </li>
+            ))}
+          </ul>
+        );
+        continue;
+      }
+      // Header
+      if (line.startsWith('##')) {
+        elements.push(<div key={`h-${i}`} className="text-xs font-bold text-yellow-300/70 tracking-wider uppercase mt-3 mb-1">{line.replace(/^#+\s*/, '')}</div>);
+        i++; continue;
+      }
+      // Empty line
+      if (!line.trim()) { elements.push(<div key={`br-${i}`} className="h-2" />); i++; continue; }
+      // Regular paragraph
+      elements.push(<p key={`p-${i}`} className="text-sm text-gray-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: inlineFormat(line) }} />);
+      i++;
+    }
+    return elements;
+  }
+
+  function inlineFormat(text: string): string {
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white">$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em class="text-gray-200">$1</em>')
+      .replace(/`(.+?)`/g, '<code class="text-yellow-300/80 bg-white/5 px-1 rounded text-xs">$1</code>');
+  }
+
+  function timeAgoSession(iso: string) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg,#04040e 0%,#060612 100%)' }}>
@@ -216,13 +344,17 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
 
         {/* View toggle */}
         <div className="flex shrink-0" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '2px' }}>
-          {(['oracle','browse'] as ViewMode[]).map(v => (
-            <button key={v} onClick={() => setView(v)}
+          {([
+            { id: 'oracle',   label: '✦ Ask' },
+            { id: 'history',  label: `💬 History${sessions.length > 0 ? ` (${sessions.length})` : ''}` },
+            { id: 'browse',   label: `◈ Insights${cleanedWisdom.length > 0 ? ` (${cleanedWisdom.length})` : ''}` },
+          ] as { id: ViewMode; label: string }[]).map(({ id, label }) => (
+            <button key={id} onClick={() => setView(id)}
               className="px-3 py-1 rounded-md text-[10px] font-semibold tracking-wider transition-all"
-              style={view === v
+              style={view === id
                 ? { background: 'rgba(99,102,241,0.3)', color: '#e0e7ff', border: '1px solid rgba(99,102,241,0.4)' }
                 : { color: '#4b5563', border: '1px solid transparent' }}>
-              {v === 'oracle' ? '✦ Oracle' : `◈ Wisdom Log${cleanedWisdom.length > 0 ? ` (${cleanedWisdom.length})` : ''}`}
+              {label}
             </button>
           ))}
         </div>
@@ -231,55 +363,123 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
       {/* ── ORACLE VIEW ───────────────────────────────────────────────────── */}
       {view === 'oracle' && (
         <>
-          <div className="relative flex-1 min-h-0">
+          {/* Canvas — shrinks when answer is shown */}
+          <div className="relative shrink-0 transition-all duration-500" style={{ height: answer && answerVisible ? '160px' : 'calc(100% - 180px)', minHeight: '100px' }}>
             <canvas ref={canvasRef} className="w-full h-full block" />
-            {oracleState === 'idle' && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: '8%' }}>
+            {oracleState === 'idle' && !answer && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-[11px] tracking-[0.35em] font-bold" style={{ color: 'rgba(75,85,99,0.7)' }}>✦ DOME WISDOM ORACLE ✦</div>
               </div>
             )}
             {oracleState === 'thinking' && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none">
                 <div className="text-[11px] tracking-[0.3em] font-bold px-4 py-1.5 rounded-full"
                   style={{ color: '#60a5fa', background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(96,165,250,0.2)', animation: 'pulse 1.2s ease-in-out infinite alternate' }}>
                   CHANNELING DOME KNOWLEDGE...
                 </div>
               </div>
             )}
-            {answer && answerVisible && (
-              <div className="absolute bottom-4 left-0 right-0 px-4 flex justify-center">
-                <div className="w-full max-w-2xl rounded-2xl p-5" style={{ background: 'rgba(0,0,0,0.93)', border: '1px solid rgba(251,191,36,0.4)', boxShadow: '0 0 40px rgba(251,191,36,0.12)' }}>
-                  <div className="text-[10px] tracking-[0.4em] font-bold mb-3" style={{ color: '#fbbf24' }}>◈ THE ORACLE SPEAKS ◈</div>
-                  <p className="text-sm leading-relaxed" style={{ color: '#e2e8f0' }}>{answer}</p>
-                  <div className="text-[10px] mt-3" style={{ color: 'rgba(251,191,36,0.3)' }}>
-                    Answer synthesized from real-time DOME Brain data · Questions inform the nightly wisdom synthesis
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
+          {/* Answer panel — persists until next question */}
+          {answer && answerVisible && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3" style={{ borderTop: '1px solid rgba(251,191,36,0.2)', background: 'rgba(0,0,0,0.85)' }}>
+              <div className="max-w-3xl mx-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[10px] tracking-[0.35em] font-bold" style={{ color: '#fbbf24' }}>◈ ORACLE ANSWER</div>
+                  <button onClick={() => { setAnswer(null); setAnswerVisible(false); stateRef.current='idle'; setOracleState('idle'); setStatusText('Seek knowledge from the DOME Oracle...'); }}
+                    className="text-gray-600 hover:text-gray-400 text-xs px-2 py-0.5 rounded"
+                    style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+                    ✕ Dismiss
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {renderMarkdown(answer)}
+                </div>
+                <div className="mt-4 pt-3 flex items-center justify-between" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span className="text-[10px]" style={{ color: 'rgba(251,191,36,0.3)' }}>Synthesized from live DOME data · Stored in History</span>
+                  <button onClick={() => setView('history')}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors">
+                    View all history →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Input */}
-          <div className="shrink-0 p-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
-            <div className="max-w-2xl mx-auto flex gap-3 items-end">
+          <div className="shrink-0 p-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+            <div className="max-w-3xl mx-auto flex gap-2 items-end">
               <textarea value={question} onChange={e=>setQuestion(e.target.value)}
                 onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleAsk();} }}
-                placeholder="What do you seek from the DOME Oracle? Ask about any project, metric, or strategy..."
+                placeholder="Ask the Oracle anything about DOME — revenue, agent performance, marketing ROI, best states..."
                 rows={2} disabled={isLoading||oracleState!=='idle'}
-                className="flex-1 resize-none rounded-xl px-4 py-3 text-sm placeholder-gray-700 outline-none transition-all"
+                className="flex-1 resize-none rounded-xl px-4 py-2.5 text-sm placeholder-gray-700 outline-none transition-all"
                 style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${oracleState!=='idle'?'rgba(251,191,36,0.25)':'rgba(255,255,255,0.09)'}`, color: '#e2e8f0', lineHeight: 1.5 }} />
               <button onClick={handleAsk} disabled={!question.trim()||isLoading||oracleState!=='idle'}
-                className="shrink-0 flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all"
+                className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
                 style={{ background: question.trim()&&oracleState==='idle'?'linear-gradient(135deg,#4f46e5,#7c3aed)':'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: question.trim()&&oracleState==='idle'?'#e0e7ff':'#374151', boxShadow: question.trim()&&oracleState==='idle'?'0 0 24px rgba(99,102,241,0.45)':'none', cursor: question.trim()&&oracleState==='idle'?'pointer':'not-allowed' }}>
                 <span>{oracleState==='thinking'?'⟳':'✦'}</span>
                 <span>{oracleState==='thinking'?'Channeling...':oracleState==='answering'?'Speaking...':'Ask'}</span>
               </button>
             </div>
-            <p className="text-center text-[10px] text-gray-700 mt-2">
-              The Oracle queries live DOME data in real time · Questions are stored and inform the nightly synthesis · Enter to ask
-            </p>
           </div>
         </>
+      )}
+
+      {/* ── HISTORY VIEW ──────────────────────────────────────────────────── */}
+      {view === 'history' && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="shrink-0 flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Past Questions & Answers</span>
+            <button onClick={loadSessions} className="text-[10px] text-gray-600 hover:text-gray-400"
+              style={{ border: '1px solid rgba(255,255,255,0.07)', borderRadius: 6, padding: '2px 8px' }}>
+              {sessionsLoading ? '⟳ Loading...' : '↺ Refresh'}
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {sessionsLoading && sessions.length === 0 && (
+              <div className="flex items-center justify-center h-32 text-gray-600 text-sm">Loading history...</div>
+            )}
+            {!sessionsLoading && sessions.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-32 gap-2 text-center">
+                <div className="text-4xl opacity-20">💬</div>
+                <div className="text-gray-600 text-sm">No questions asked yet.</div>
+                <button onClick={() => setView('oracle')} className="text-xs text-indigo-400 hover:text-indigo-300">Ask the Oracle →</button>
+              </div>
+            )}
+            {sessions.map(s => {
+              const isExpanded = expandedSession === s.id;
+              return (
+                <div key={s.id} className="rounded-xl overflow-hidden cursor-pointer transition-all"
+                  style={{ border: `1px solid ${isExpanded ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.07)'}`, background: isExpanded ? 'rgba(99,102,241,0.06)' : 'rgba(255,255,255,0.02)' }}
+                  onClick={() => setExpandedSession(isExpanded ? null : s.id)}>
+                  {/* Question header */}
+                  <div className="flex items-start gap-3 p-3">
+                    <div className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black mt-0.5"
+                      style={{ background: 'rgba(99,102,241,0.25)', color: '#a5b4fc' }}>Q</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white leading-snug">{s.question}</div>
+                      <div className="text-[10px] text-gray-600 mt-0.5 flex items-center gap-2">
+                        <span>{timeAgoSession(s.created_at)}</span>
+                        {s.team_member && <><span>·</span><span>{s.team_member}</span></>}
+                        <span>·</span>
+                        <span className="text-indigo-400/60">{isExpanded ? '▲ collapse' : '▼ show answer'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Answer — expanded */}
+                  {isExpanded && (
+                    <div className="px-4 pb-4 pt-1 space-y-1" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div className="text-[10px] font-bold text-yellow-400/50 tracking-widest mb-2">◈ ANSWER</div>
+                      {renderMarkdown(s.answer)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* ── BROWSE VIEW ───────────────────────────────────────────────────── */}
