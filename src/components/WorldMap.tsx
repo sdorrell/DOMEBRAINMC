@@ -471,6 +471,7 @@ function drawPolyAvatar(
   emote: string | null,
   emoteTimer: number,
   tick: number,
+  cosmetics?: PlayerCosmetics,
 ) {
   const tier = getLevelTier(member.level);
   const isOffline = member.status === 'offline';
@@ -523,11 +524,25 @@ function drawPolyAvatar(
   ctx.fillStyle = '#3e2723';
   ctx.fillRect(bx - 10, bodyTop + 13, 20, 3);
 
+  // ── Aura (cosmetic)
+  if (cosmetics?.aura) {
+    const auraColor = COSMETIC_ITEMS.find(i => i.id === cosmetics.aura)?.color || '#ffd600';
+    const pulse = 0.15 + Math.sin(tick * 0.08) * 0.06;
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    const grad = ctx.createRadialGradient(bx, by - 14, 8, bx, by - 14, 28);
+    grad.addColorStop(0, auraColor + 'ff');
+    grad.addColorStop(1, auraColor + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(bx, by - 14, 28, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // ── Cape
-  if (tier.cape) {
+  if (tier.cape || cosmetics?.capeColor) {
     ctx.save();
     ctx.globalAlpha = 0.9;
-    ctx.fillStyle = tier.color;
+    ctx.fillStyle = cosmetics?.capeColor || tier.color;
     ctx.beginPath();
     ctx.moveTo(bx - 9, bodyTop + 2);
     ctx.lineTo(bx - 14, bodyTop + 22 + (moving ? legSwing : 0));
@@ -571,16 +586,17 @@ function drawPolyAvatar(
   ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(bx, hy + 2, 3.5, 0.15, Math.PI - 0.15); ctx.stroke();
 
-  // ── Helmet (tribe color, Polytopia style)
-  ctx.fillStyle = member.avatarColor;
+  // ── Helmet (tribe color or cosmetic override)
+  const helmetBase = cosmetics?.helmetColor || member.avatarColor;
+  ctx.fillStyle = helmetBase;
   ctx.beginPath();
   ctx.arc(bx, hy - 4, 11, Math.PI, 0); ctx.fill();
   ctx.fillRect(bx - 11, hy - 8, 22, 6);
   // Helmet rim
-  ctx.fillStyle = darker(member.avatarColor, 0.2);
+  ctx.fillStyle = darker(helmetBase, 0.2);
   ctx.fillRect(bx - 12, hy - 2, 24, 3);
   // Helmet highlight
-  ctx.fillStyle = lighter(member.avatarColor, 0.3);
+  ctx.fillStyle = lighter(helmetBase, 0.3);
   ctx.beginPath(); ctx.arc(bx - 4, hy - 7, 4, Math.PI * 1.1, Math.PI * 1.8); ctx.fill();
 
   // ── Crown (level 21+)
@@ -727,11 +743,33 @@ interface WorldMapProps {
   onSendChat: (text: string) => void;
   playerCoins?: number;
   liveMembers?: import('../types').TeamMember[];
+  onSpendCoins?: (amount: number) => void;
 }
+
+interface PlayerCosmetics {
+  helmetColor?: string;
+  capeColor?: string;
+  aura?: string;
+}
+
+const COSMETIC_ITEMS = [
+  { id: 'helmet_gold', label: 'Gold Helmet', category: 'helmet', color: '#ffd600', price: 50 },
+  { id: 'helmet_cyan', label: 'Cyan Helmet', category: 'helmet', color: '#00bcd4', price: 50 },
+  { id: 'helmet_pink', label: 'Pink Helmet', category: 'helmet', color: '#e91e63', price: 50 },
+  { id: 'helmet_lime', label: 'Lime Helmet', category: 'helmet', color: '#76ff03', price: 75 },
+  { id: 'helmet_obsidian', label: 'Obsidian Helm', category: 'helmet', color: '#212121', price: 100 },
+  { id: 'cape_gold', label: 'Gold Cape', category: 'cape', color: '#ffd600', price: 75 },
+  { id: 'cape_red', label: 'Crimson Cape', category: 'cape', color: '#d32f2f', price: 75 },
+  { id: 'cape_teal', label: 'Teal Cape', category: 'cape', color: '#00695c', price: 75 },
+  { id: 'cape_purple', label: 'Royal Cape', category: 'cape', color: '#6a1b9a', price: 100 },
+  { id: 'aura_fire', label: '🔥 Fire Aura', category: 'aura', color: '#ff5722', price: 150 },
+  { id: 'aura_ice', label: '❄️ Ice Aura', category: 'aura', color: '#4fc3f7', price: 150 },
+  { id: 'aura_gold', label: '✨ Gold Aura', category: 'aura', color: '#ffd600', price: 200 },
+] as const;
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction, onChallenge, chatMessages, onSendChat, playerCoins, liveMembers }: WorldMapProps) {
+export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction, onChallenge, chatMessages, onSendChat, playerCoins, liveMembers, onSpendCoins }: WorldMapProps) {
   // Use liveMembers if provided, otherwise fall back to static TEAM_MEMBERS
   const members = liveMembers && liveMembers.length > 0 ? liveMembers : TEAM_MEMBERS;
 
@@ -760,6 +798,14 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
   const [currentZone, setCurrentZone] = useState<Zone | null>(null);
   const [hoveredMember, setHoveredMember] = useState<TeamMember | null>(null);
   const [nearbyMember, setNearbyMember] = useState<TeamMember | null>(null);
+  const [showShop, setShowShop] = useState(false);
+  const [myCosmetics, setMyCosmetics] = useState<PlayerCosmetics>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`dome_cosmetics_${controlledMemberId}`) || '{}');
+    } catch { return {}; }
+  });
+  const myCosmeticsRef = useRef<PlayerCosmetics>(myCosmetics);
+  useEffect(() => { myCosmeticsRef.current = myCosmetics; }, [myCosmetics]);
 
   const camRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
   const statesRef = useRef<Record<string, PlayerState>>({});
@@ -869,18 +915,6 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
     return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
   }, [controlledMemberId, onZoneAction]);
 
-  // Init camera
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const s = playerStates[controlledMemberId];
-    if (!s) return;
-    const { x: sx, y: sy } = iso(s.x, s.y, 0, 0);
-    const tx = sx - c.width/2 + TW/2;
-    const ty = sy - c.height/2 + TH;
-    camRef.current = { x: tx, y: ty, tx, ty };
-  }, []); // eslint-disable-line
-
   // Main loop
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -888,8 +922,23 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Resize canvas
-    const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
+    let cameraInitialized = false;
+
+    // Resize canvas — init camera on first resize when canvas has real dimensions
+    const resize = () => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      if (!cameraInitialized && canvas.width > 0 && canvas.height > 0) {
+        cameraInitialized = true;
+        const s = playerStates[controlledMemberId];
+        if (s) {
+          const { x: sx, y: sy } = iso(s.x, s.y, 0, 0);
+          const tx = sx - canvas.width / 2 + TW / 2;
+          const ty = sy - canvas.height / 2 + TH;
+          camRef.current = { x: tx, y: ty, tx, ty };
+        }
+      }
+    };
     resize();
     window.addEventListener('resize', resize);
 
@@ -1036,6 +1085,7 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
             ctx, member, sx, sy - WALL + TH/2,
             member.id === controlledMemberId,
             s.moving, s.frame, s.emote, s.emoteTimer, tick,
+            member.id === controlledMemberId ? myCosmeticsRef.current : undefined,
           ),
         });
       }
@@ -1234,12 +1284,20 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
             </div>
           )}
 
-          {/* Coin HUD — top left */}
-          <div className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-xl pointer-events-none"
-            style={{ background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,214,0,0.3)', backdropFilter: 'blur(4px)' }}>
-            <span className="text-base">💰</span>
-            <span className="font-black text-yellow-400 text-sm">{playerCoins ?? TEAM_MEMBERS.find(m => m.id === controlledMemberId)?.coins ?? 0}</span>
-            <span className="text-[10px] text-yellow-400/60">coins</span>
+          {/* Coin HUD + Shop button — top left */}
+          <div className="absolute top-3 left-3 flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl pointer-events-none"
+              style={{ background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,214,0,0.3)', backdropFilter: 'blur(4px)' }}>
+              <span className="text-base">💰</span>
+              <span className="font-black text-yellow-400 text-sm">{playerCoins ?? TEAM_MEMBERS.find(m => m.id === controlledMemberId)?.coins ?? 0}</span>
+              <span className="text-[10px] text-yellow-400/60">coins</span>
+            </div>
+            <button
+              onClick={() => setShowShop(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:scale-105"
+              style={{ background: showShop ? 'rgba(251,191,36,0.3)' : 'rgba(0,0,0,0.65)', border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24', backdropFilter: 'blur(4px)' }}>
+              🛍 Shop
+            </button>
           </div>
 
           {/* Controls hint + Help button */}
@@ -1309,6 +1367,88 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
                   </HelpSection>
                 </div>
                 <div className="mt-4 text-center text-[10px] text-gray-600">Click anywhere outside or press ✕ to close</div>
+              </div>
+            </div>
+          )}
+
+          {/* 🛍 Cosmetics Shop */}
+          {showShop && (
+            <div className="absolute inset-0 flex items-center justify-center z-40 p-4"
+              style={{ background: 'rgba(0,5,20,0.92)', backdropFilter: 'blur(8px)' }}
+              onClick={() => setShowShop(false)}>
+              <div className="rounded-2xl p-5 w-full max-w-sm max-h-[80vh] overflow-y-auto"
+                style={{ background: 'rgba(10,20,50,0.98)', border: '1px solid rgba(251,191,36,0.4)', boxShadow: '0 0 40px rgba(251,191,36,0.15)' }}
+                onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="text-base font-black text-white">🛍 Cosmetics Shop</div>
+                    <div className="text-xs text-yellow-400/60">Spend coins to customize your look</div>
+                  </div>
+                  <button onClick={() => setShowShop(false)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                </div>
+                {(['helmet', 'cape', 'aura'] as const).map(cat => (
+                  <div key={cat} className="mb-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                      style={{ color: cat === 'helmet' ? '#60a5fa' : cat === 'cape' ? '#c084fc' : '#fbbf24' }}>
+                      {cat === 'helmet' ? '⛑ Helmet' : cat === 'cape' ? '🦸 Cape' : '✨ Aura'}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {COSMETIC_ITEMS.filter(i => i.category === cat).map(item => {
+                        const ownedList = (() => { try { return JSON.parse(localStorage.getItem(`dome_owned_${controlledMemberId}`) || '[]') as string[]; } catch { return [] as string[]; } })();
+                        const owned = ownedList.includes(item.id);
+                        const equipped = (cat === 'helmet' ? myCosmetics.helmetColor : cat === 'cape' ? myCosmetics.capeColor : myCosmetics.aura) === (cat === 'aura' ? item.id : item.color);
+                        const coins = playerCoins ?? TEAM_MEMBERS.find(m => m.id === controlledMemberId)?.coins ?? 0;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              if (equipped) {
+                                const next = { ...myCosmetics };
+                                if (cat === 'helmet') delete next.helmetColor;
+                                else if (cat === 'cape') delete next.capeColor;
+                                else delete next.aura;
+                                setMyCosmetics(next);
+                                localStorage.setItem(`dome_cosmetics_${controlledMemberId}`, JSON.stringify(next));
+                              } else if (owned) {
+                                const next = { ...myCosmetics };
+                                if (cat === 'helmet') next.helmetColor = item.color;
+                                else if (cat === 'cape') next.capeColor = item.color;
+                                else next.aura = item.id;
+                                setMyCosmetics(next);
+                                localStorage.setItem(`dome_cosmetics_${controlledMemberId}`, JSON.stringify(next));
+                              } else if (coins >= item.price) {
+                                const ol = (() => { try { return JSON.parse(localStorage.getItem(`dome_owned_${controlledMemberId}`) || '[]') as string[]; } catch { return [] as string[]; } })();
+                                ol.push(item.id);
+                                localStorage.setItem(`dome_owned_${controlledMemberId}`, JSON.stringify(ol));
+                                const next = { ...myCosmetics };
+                                if (cat === 'helmet') next.helmetColor = item.color;
+                                else if (cat === 'cape') next.capeColor = item.color;
+                                else next.aura = item.id;
+                                setMyCosmetics(next);
+                                localStorage.setItem(`dome_cosmetics_${controlledMemberId}`, JSON.stringify(next));
+                                onSpendCoins?.(item.price);
+                              }
+                            }}
+                            className="flex items-center gap-2 p-2.5 rounded-xl text-left transition-all"
+                            style={{
+                              background: equipped ? 'rgba(251,191,36,0.2)' : owned ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${equipped ? 'rgba(251,191,36,0.6)' : owned ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                              opacity: !owned && coins < item.price ? 0.5 : 1,
+                            }}>
+                            <div className="w-5 h-5 rounded-full shrink-0" style={{ background: item.color, boxShadow: `0 0 6px ${item.color}88` }} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-semibold text-white truncate">{item.label}</div>
+                              <div className="text-[10px]" style={{ color: equipped ? '#fbbf24' : owned ? '#69f0ae' : '#9ca3af' }}>
+                                {equipped ? '✓ Equipped' : owned ? 'Tap to equip' : `💰 ${item.price}`}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                <div className="mt-2 text-center text-[10px] text-gray-600">Win battles to earn coins · Cosmetics saved locally</div>
               </div>
             </div>
           )}

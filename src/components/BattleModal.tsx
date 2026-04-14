@@ -89,9 +89,19 @@ function _soundEnabled(): boolean {
   try { return localStorage.getItem('dome_battle_sound') !== 'off'; } catch { return true; }
 }
 
+function _getAudioCtx(): AudioContext | null {
+  try {
+    const w = window as typeof window & { __domeAudioCtx?: AudioContext };
+    if (!w.__domeAudioCtx) w.__domeAudioCtx = new AudioContext();
+    if (w.__domeAudioCtx.state === 'suspended') w.__domeAudioCtx.resume();
+    return w.__domeAudioCtx;
+  } catch { return null; }
+}
+
 function _tone(freq: number, type: OscillatorType, dur: number, vol = 0.22, delay = 0): void {
   try {
-    const ctx = new AudioContext();
+    const ctx = _getAudioCtx();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -103,7 +113,6 @@ function _tone(freq: number, type: OscillatorType, dur: number, vol = 0.22, dela
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
     osc.start(ctx.currentTime + delay);
     osc.stop(ctx.currentTime + delay + dur + 0.05);
-    osc.onended = () => { try { ctx.close(); } catch { /* ignore */ } };
   } catch { /* no AudioContext */ }
 }
 

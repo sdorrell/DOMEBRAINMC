@@ -272,8 +272,13 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
 
   // ── Audio helpers ───────────────────────────────────────────────────────────
   const getCtx = () => {
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    return audioCtxRef.current;
+    const w = window as typeof window & { __domeAudioCtx?: AudioContext };
+    if (!w.__domeAudioCtx) {
+      w.__domeAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (w.__domeAudioCtx.state === 'suspended') w.__domeAudioCtx.resume();
+    audioCtxRef.current = w.__domeAudioCtx;
+    return w.__domeAudioCtx;
   };
   const playThinking = () => {
     try {

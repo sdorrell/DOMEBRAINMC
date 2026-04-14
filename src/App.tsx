@@ -473,6 +473,27 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     };
   }, [controlledMemberId]);
 
+  // ─── Global audio context unlock on first user interaction ──────────────────
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        const w = window as typeof window & { __domeAudioCtx?: AudioContext };
+        if (!w.__domeAudioCtx) {
+          w.__domeAudioCtx = new AudioContext();
+        }
+        if (w.__domeAudioCtx.state === 'suspended') {
+          w.__domeAudioCtx.resume();
+        }
+      } catch { /* no AudioContext support */ }
+    };
+    window.addEventListener('click', unlock, { once: false });
+    window.addEventListener('keydown', unlock, { once: false });
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
   // ─── Daily standup prompt — posts at 9am if not yet sent today ───────────────
   useEffect(() => {
     if (!ready) return;
@@ -520,11 +541,47 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   // ─── Zone action (E key / button) ────────────────────────────────────────────
   const [domeMeetingOpen, setDomeMeetingOpen] = useState(false);
 
+  const RANDOM_HOT_TAKES = [
+    "Cold email still converts better than most paid ads",
+    "Your CAC is lying to you — attribution is broken",
+    "The best retention strategy is a great onboarding flow",
+    "Most companies spend 80% on acquisition, 20% on retention — backwards",
+    "Speed of follow-up matters more than the offer",
+  ];
+
   const handleZoneAction = (zone: Zone) => {
-    if (zone.id === 'green_couch') {
-      setDomeMeetingOpen(true);
+    switch (zone.id) {
+      case 'green_couch':
+        setDomeMeetingOpen(true);
+        break;
+      case 'grind_zone':
+        setTab('dashboard');
+        showToast('Entering the Grind Zone 💪', '📊', '#43a047');
+        break;
+      case 'idea_lab':
+        setTab('ideas');
+        showToast('Welcome to the Idea Lab 🧪', '💡', '#8e24aa');
+        break;
+      case 'war_room':
+        setTab('projects');
+        showToast('Into the War Room 🗺️', '⚔️', '#e64a19');
+        break;
+      case 'coffee_corner': {
+        showToast('+5 XP from the coffee corner ☕', '⚡', '#8d6e63');
+        handleSendChat(`☕ grabbed a coffee and feels energized! (+5 XP)`);
+        break;
+      }
+      case 'watercooler': {
+        const take = RANDOM_HOT_TAKES[Math.floor(Math.random() * RANDOM_HOT_TAKES.length)];
+        handleSendChat(`💧 Hot Take: "${take}"`);
+        showToast('Hot take dropped at the watercooler 💧', '🗣️', '#0288d1');
+        break;
+      }
+      case 'trophy_wall':
+        setTab('leaderboard');
+        showToast('Checking the Trophy Wall 🏆', '🏆', '#f9a825');
+        break;
     }
-    // Other zones can be wired up here as needed
   };
 
   const handleSendChat = async (text: string) => {
@@ -722,6 +779,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
             onSendChat={handleSendChat}
             playerCoins={playerCoins}
             liveMembers={liveMembers}
+            onSpendCoins={(amount) => setPlayerCoins(c => Math.max(0, c - amount))}
           />
         )}
         {tab === 'dashboard' && <Dashboard liveMembers={liveMembers} />}
