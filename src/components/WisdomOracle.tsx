@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
 
 type OracleState = 'idle' | 'thinking' | 'answering';
 
@@ -354,60 +353,32 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
     setAnswerVisible(false);
     stateRef.current = 'thinking';
     setOracleState('thinking');
-    setStatusText('The Oracle searches the depths of DOME knowledge...');
+    setStatusText('The Oracle channels the depths of DOME knowledge...');
     playThinking();
 
+    const ORACLE_URL = 'https://domebrain-production.up.railway.app/oracle';
+    const ORACLE_KEY = import.meta.env.VITE_ORACLE_KEY ?? '';
+
     try {
-      // Store question so nightly agent picks it up
-      await supabase.from('dome_wisdom').insert({
-        title: question.trim().slice(0, 200),
-        insight: `[User Question] ${question.trim()}`,
-        insight_type: 'user_question',
-        priority: 3,
-        reviewed: false,
-        source_data: {
-          asked_by: currentUserId,
-          asked_at: new Date().toISOString(),
-          question: question.trim(),
-        },
-      });
+      // Minimum theatrical pause runs in parallel with the fetch
+      const [res] = await Promise.all([
+        fetch(ORACLE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ORACLE_KEY}`,
+          },
+          body: JSON.stringify({ question: question.trim() }),
+        }),
+        new Promise(r => setTimeout(r, 3000)), // min thinking time for drama
+      ]);
 
-      // Fetch non-question wisdom
-      const { data } = await supabase
-        .from('dome_wisdom')
-        .select('id, title, insight, insight_type, priority')
-        .not('insight_type', 'eq', 'user_question')
-        .order('priority', { ascending: false })
-        .limit(80);
-
-      // Keyword relevance scoring
-      const stopWords = new Set(['what','when','where','which','will','does','should','have','with','that','this','from','they','there','their','about','some','more','been','into','over','just','like','also','than','then','much']);
-      const qWords = question
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .split(/\s+/)
-        .filter(w => w.length > 3 && !stopWords.has(w));
-
-      let results: WisdomEntry[] = [];
-
-      if (data && qWords.length > 0) {
-        const scored = data
-          .map(e => {
-            const haystack = `${e.title} ${e.insight}`.toLowerCase();
-            const score = qWords.reduce((s, w) => s + (haystack.includes(w) ? 1 : 0), 0);
-            return { ...e, _score: score };
-          })
-          .filter(e => e._score > 0)
-          .sort((a, b) => b._score - a._score || (b.priority ?? 0) - (a.priority ?? 0));
-        results = scored.slice(0, 3);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `Oracle server error ${res.status}`);
       }
 
-      if (results.length === 0 && data) {
-        results = data.slice(0, 2);
-      }
-
-      // Minimum theatrical pause
-      await new Promise(r => setTimeout(r, 3000));
+      const { answer } = await res.json();
 
       stopThinking();
       playAnswer();
@@ -415,15 +386,7 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
       stateRef.current = 'answering';
       setOracleState('answering');
       setStatusText('The Oracle has spoken.');
-      setAnswers(
-        results.length > 0
-          ? results
-          : [{
-              title: 'Your Question Has Been Received',
-              insight:
-                'The Oracle has recorded your inquiry and will weave it into the nightly wisdom synthesis. Return tomorrow — the intelligence cycle will have an answer.',
-            }]
-      );
+      setAnswers([{ title: 'DOME Oracle', insight: answer }]);
 
       // Brief delay before revealing answer panel
       setTimeout(() => setAnswerVisible(true), 600);
@@ -435,11 +398,13 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
         setStatusText('Seek knowledge from the DOME Oracle...');
         setAnswerVisible(false);
         setTimeout(() => setAnswers(null), 800);
-      }, 16000);
-    } catch {
+      }, 18000);
+
+    } catch (err: any) {
+      stopThinking();
       stateRef.current = 'idle';
       setOracleState('idle');
-      setStatusText('The Oracle is momentarily unreachable. Try again.');
+      setStatusText(`Oracle unreachable: ${err?.message ?? 'unknown error'}. Try again.`);
     } finally {
       setIsLoading(false);
     }
