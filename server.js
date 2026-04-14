@@ -1,15 +1,24 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve static files from dist and public
-app.use(express.static(path.join(__dirname, 'dist')));
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static assets (JS, CSS, images) — these never contain secrets
+app.use(express.static(path.join(__dirname, 'dist'), { index: false }));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
-// Explicit routes for legal pages (served before SPA fallback)
+// Inject runtime env vars into index.html for the SPA
+function injectEnv(html) {
+  const envScript = `<script>window.__DOME_ENV__ = ${JSON.stringify({
+    ORACLE_KEY: process.env.VITE_ORACLE_KEY || '',
+  })};</script>`;
+  return html.replace('</head>', envScript + '</head>');
+}
+
+// Explicit routes for legal pages
 app.get('/terms', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'terms.html'));
 });
@@ -18,9 +27,12 @@ app.get('/privacy', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'privacy.html'));
 });
 
-// SPA fallback — all other routes return index.html
+// SPA fallback — inject env vars then serve index.html
 app.get('/{*splat}', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  const html = fs.readFileSync(indexPath, 'utf8');
+  res.setHeader('Content-Type', 'text/html');
+  res.send(injectEnv(html));
 });
 
 app.listen(PORT, () => {

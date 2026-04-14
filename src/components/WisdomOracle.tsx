@@ -31,7 +31,7 @@ interface WisdomEntry {
 }
 
 const ORACLE_BASE = 'https://domebrain-production.up.railway.app';
-const ORACLE_KEY = (import.meta.env.VITE_ORACLE_KEY as string) ?? '';
+const ORACLE_KEY: string = (typeof window !== 'undefined' && (window as any).__DOME_ENV__?.ORACLE_KEY) || '';
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
   risk:          { label: '⚠ Risk',        color: '#f87171', bg: 'rgba(239,68,68,0.07)',   border: 'rgba(239,68,68,0.2)' },
