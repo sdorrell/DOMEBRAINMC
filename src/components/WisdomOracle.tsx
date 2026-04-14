@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 type OracleState = 'idle' | 'thinking' | 'answering';
-type ViewMode = 'oracle' | 'history' | 'browse';
+type ViewMode = 'oracle' | 'history' | 'browse' | 'grade';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface OracleSession {
@@ -12,6 +12,86 @@ interface OracleSession {
   team_member: string | null;
   created_at: string;
 }
+
+interface OracleIntelligence {
+  id: string;
+  assessed_at: string;
+  career_level: string;
+  career_score: number;
+  domain_scores: Record<string, number>;
+  strengths: string[];
+  knowledge_gaps: string[];
+  next_milestone: string | null;
+  self_assessment: string | null;
+  data_sources_used: string[];
+  questions_answered: number;
+  sessions_analyzed: number;
+}
+
+// ── Career ladder ──────────────────────────────────────────────────────────────
+const CAREER_LADDER = [
+  { level: 'Intern',          min: 0,  max: 18,  color: '#6b7280', glow: 'rgba(107,114,128,0.4)',  icon: '🎓', desc: 'Still learning the org chart' },
+  { level: 'Analyst',         min: 18, max: 35,  color: '#3b82f6', glow: 'rgba(59,130,246,0.4)',   icon: '📊', desc: 'Reading dashboards, spotting patterns' },
+  { level: 'Sr. Analyst',     min: 35, max: 50,  color: '#8b5cf6', glow: 'rgba(139,92,246,0.4)',   icon: '🔍', desc: 'Cross-functional data fluency' },
+  { level: 'Manager',         min: 50, max: 62,  color: '#06b6d4', glow: 'rgba(6,182,212,0.4)',    icon: '👔', desc: 'Driving decisions in one department' },
+  { level: 'Director',        min: 62, max: 74,  color: '#f59e0b', glow: 'rgba(245,158,11,0.4)',   icon: '🎯', desc: 'Multi-department strategic thinking' },
+  { level: 'VP',              min: 74, max: 83,  color: '#f97316', glow: 'rgba(249,115,22,0.4)',   icon: '⭐', desc: 'Org-wide optimization authority' },
+  { level: 'COO',             min: 83, max: 88,  color: '#10b981', glow: 'rgba(16,185,129,0.4)',   icon: '⚙️', desc: 'Full operational command' },
+  { level: 'CMO',             min: 83, max: 88,  color: '#ec4899', glow: 'rgba(236,72,153,0.4)',   icon: '📣', desc: 'Growth and brand mastery' },
+  { level: 'CFO',             min: 83, max: 88,  color: '#22c55e', glow: 'rgba(34,197,94,0.4)',    icon: '💰', desc: 'Financial architecture command' },
+  { level: 'CTO',             min: 83, max: 88,  color: '#60a5fa', glow: 'rgba(96,165,250,0.4)',   icon: '🔧', desc: 'Full-stack technology mastery' },
+  { level: 'CEO',             min: 94, max: 100, color: '#fbbf24', glow: 'rgba(251,191,36,0.6)',   icon: '👑', desc: 'Runs the company better than humans' },
+];
+
+const DOMAINS = [
+  { key: 'sales',      label: 'Sales',       icon: '💼', desc: 'Member volume, plan mix, agent production' },
+  { key: 'marketing',  label: 'Marketing',   icon: '📣', desc: 'Channel ROI, cost/call, conversion rates' },
+  { key: 'finance',    label: 'Finance',     icon: '💰', desc: 'Revenue, commissions, cash flow, P&L' },
+  { key: 'operations', label: 'Operations',  icon: '⚙️', desc: 'Call center KPIs, service levels, efficiency' },
+  { key: 'technology', label: 'Technology',  icon: '🔧', desc: 'Systems, integrations, data pipelines' },
+  { key: 'hr',         label: 'People',      icon: '👥', desc: 'Team performance, agent behavior, retention' },
+  { key: 'strategy',   label: 'Strategy',    icon: '🎯', desc: 'Cross-functional synthesis, growth levers' },
+];
+
+function getCareerTier(score: number) {
+  return CAREER_LADDER.find(t => score >= t.min && score < t.max) || CAREER_LADDER[CAREER_LADDER.length - 1];
+}
+
+// Self-grading prompt sent to Oracle server
+const SELF_GRADE_PROMPT = `You are the DOME Oracle. Conduct a rigorous self-assessment of your current intelligence and understanding of the DOME business.
+
+DOME is a health benefits sales organization that sells subscription-based benefit plans (dental, vision, wellness, limited benefit health insurance, fixed indemnity, value-added benefits) averaging $280-$480/month. They operate a call center with tracked agents, run paid advertising campaigns across multiple channels, and manage tens of thousands of active members.
+
+Your available data sources include:
+- commission_members: 80,000+ customer records (product, state, revenue, agent, activity)
+- commission_transactions: payment and commission history
+- cs_agent_snapshots: daily agent call metrics (calls, talk time, pause categories, bonus scores)
+- cs_nim_daily: call center daily KPIs (answer rate, queue time, service level, drops)
+- cs_kpi_targets: performance targets
+- dome_wisdom: nightly synthesis insights
+- dome_oracle_sessions: full Q&A history with the team
+- QuickBooks: financial data (P&L, cash flow, accounts)
+
+Grade yourself across 7 domains on a scale of 0-100. Be HONEST and HARSH about gaps.
+
+Respond ONLY with this exact JSON format (no other text):
+{
+  "career_score": <0-100 integer>,
+  "career_level": "<one of: Intern, Analyst, Sr. Analyst, Manager, Director, VP, COO, CMO, CFO, CTO, CEO>",
+  "domain_scores": {
+    "sales": <0-100>,
+    "marketing": <0-100>,
+    "finance": <0-100>,
+    "operations": <0-100>,
+    "technology": <0-100>,
+    "hr": <0-100>,
+    "strategy": <0-100>
+  },
+  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "knowledge_gaps": ["<gap 1>", "<gap 2>", "<gap 3>", "<gap 4>"],
+  "next_milestone": "<what specific data/queries I need to level up>",
+  "self_assessment": "<2-3 sentence honest narrative of current capabilities and what's holding me back>"
+}`;
 interface Particle {
   rainX: number; rainY: number; vy: number;
   targetX: number; targetY: number;
@@ -94,6 +174,9 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   const [sessions, setSessions] = useState<OracleSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  // Oracle intelligence / self-grading
+  const [intelligence, setIntelligence] = useState<OracleIntelligence | null>(null);
+  const [grading, setGrading] = useState(false);
 
   const ORACLE_KEY = (window as any).__DOME_ENV__?.ORACLE_KEY || (import.meta.env.VITE_ORACLE_KEY as string) || '';
 
@@ -168,6 +251,59 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
   }, []);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // ── Load latest intelligence assessment ────────────────────────────────────
+  const loadIntelligence = useCallback(async () => {
+    const { data } = await supabase
+      .from('dome_oracle_intelligence')
+      .select('*')
+      .order('assessed_at', { ascending: false })
+      .limit(1)
+      .single();
+    if (data) setIntelligence(data as OracleIntelligence);
+  }, []);
+
+  useEffect(() => { loadIntelligence(); }, [loadIntelligence]);
+
+  // ── Self-grading engine ─────────────────────────────────────────────────────
+  const runSelfAssessment = useCallback(async () => {
+    if (grading || oracleState !== 'idle') return;
+    setGrading(true);
+    try {
+      const [sessCount, wisdomCount] = await Promise.all([
+        supabase.from('dome_oracle_sessions').select('id', { count: 'exact', head: true }),
+        supabase.from('dome_wisdom').select('id', { count: 'exact', head: true }),
+      ]);
+      const res = await fetch(`${ORACLE_URL}/oracle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ORACLE_KEY}` },
+        body: JSON.stringify({ question: SELF_GRADE_PROMPT }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const { answer } = await res.json();
+      // Extract JSON from the answer (might have surrounding text)
+      const jsonMatch = answer.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON in response');
+      const parsed = JSON.parse(jsonMatch[0]);
+      // Save to Supabase
+      const { data: saved } = await supabase.from('dome_oracle_intelligence').insert({
+        career_level: parsed.career_level,
+        career_score: parsed.career_score,
+        domain_scores: parsed.domain_scores,
+        strengths: parsed.strengths,
+        knowledge_gaps: parsed.knowledge_gaps,
+        next_milestone: parsed.next_milestone,
+        self_assessment: parsed.self_assessment,
+        data_sources_used: ['commission_members','commission_transactions','cs_agent_snapshots','cs_nim_daily','dome_wisdom','dome_oracle_sessions'],
+        questions_answered: sessCount.count || 0,
+        sessions_analyzed: wisdomCount.count || 0,
+      }).select().single();
+      if (saved) setIntelligence(saved as OracleIntelligence);
+    } catch(e) {
+      console.error('Self-assessment failed:', e);
+    }
+    setGrading(false);
+  }, [grading, oracleState, ORACLE_KEY]);
 
   // ── Audio ───────────────────────────────────────────────────────────────────
   const getCtx=()=>{ if(!audioCtxRef.current) audioCtxRef.current=new(window.AudioContext||(window as any).webkitAudioContext)(); return audioCtxRef.current; };
@@ -342,12 +478,27 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
         <span className="text-[10px] tracking-widest font-bold shrink-0" style={{ color: STATE_COLOR[oracleState] }}>{STATE_LABEL[oracleState]}</span>
         <span className="text-[10px] text-gray-600 truncate flex-1">{statusText}</span>
 
+        {/* Career level badge */}
+        {intelligence && (() => {
+          const tier = getCareerTier(intelligence.career_score);
+          return (
+            <button onClick={() => setView('grade')}
+              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black transition-all hover:scale-105"
+              style={{ background: `${tier.glow}`, border: `1px solid ${tier.color}60`, color: tier.color, boxShadow: `0 0 10px ${tier.glow}` }}>
+              <span>{tier.icon}</span>
+              <span>{intelligence.career_level}</span>
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>{intelligence.career_score}</span>
+            </button>
+          );
+        })()}
+
         {/* View toggle */}
         <div className="flex shrink-0" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '2px' }}>
           {([
             { id: 'oracle',   label: '✦ Ask' },
             { id: 'history',  label: `💬 History${sessions.length > 0 ? ` (${sessions.length})` : ''}` },
             { id: 'browse',   label: `◈ Insights${cleanedWisdom.length > 0 ? ` (${cleanedWisdom.length})` : ''}` },
+            { id: 'grade',    label: `🎓 Level Up` },
           ] as { id: ViewMode; label: string }[]).map(({ id, label }) => (
             <button key={id} onClick={() => setView(id)}
               className="px-3 py-1 rounded-md text-[10px] font-semibold tracking-wider transition-all"
@@ -481,6 +632,160 @@ export default function WisdomOracle({ currentUserId }: { currentUserId: string 
           </div>
         </div>
       )}
+
+      {/* ── GRADE / LEVEL UP VIEW ─────────────────────────────────────────── */}
+      {view === 'grade' && (() => {
+        const tier = intelligence ? getCareerTier(intelligence.career_score) : CAREER_LADDER[0];
+        const nextTier = intelligence
+          ? CAREER_LADDER.find(t => t.min > intelligence.career_score) || CAREER_LADDER[CAREER_LADDER.length - 1]
+          : CAREER_LADDER[1];
+        const pctToNext = intelligence
+          ? Math.min(100, Math.round(((intelligence.career_score - tier.min) / Math.max(1, nextTier.min - tier.min)) * 100))
+          : 0;
+
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5">
+
+            {/* ── Current level card ── */}
+            <div className="rounded-2xl p-5 text-center relative overflow-hidden"
+              style={{ background: 'rgba(0,0,0,0.6)', border: `2px solid ${tier.color}50`, boxShadow: `0 0 40px ${tier.glow}` }}>
+              <div className="absolute inset-0 opacity-5"
+                style={{ background: `radial-gradient(circle at 50% 40%, ${tier.color}, transparent 70%)` }} />
+              <div className="relative">
+                <div className="text-5xl mb-2">{tier.icon}</div>
+                <div className="text-2xl font-black" style={{ color: tier.color }}>{intelligence?.career_level ?? 'Ungraded'}</div>
+                <div className="text-xs text-gray-500 mt-1 mb-3">{tier.desc}</div>
+
+                {/* Score bar */}
+                <div className="max-w-xs mx-auto">
+                  <div className="flex justify-between text-[10px] text-gray-600 mb-1">
+                    <span>Score: <strong style={{ color: tier.color }}>{intelligence?.career_score ?? 0}</strong>/100</span>
+                    <span>Next: {nextTier.icon} {nextTier.level} at {nextTier.min}</span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                    <div className="h-full rounded-full transition-all duration-1000"
+                      style={{ width: `${pctToNext}%`, background: `linear-gradient(90deg, ${tier.color}, ${nextTier.color})`, boxShadow: `0 0 8px ${tier.glow}` }} />
+                  </div>
+                  <div className="text-[10px] text-gray-600 mt-1 text-right">{pctToNext}% to {nextTier.level}</div>
+                </div>
+
+                {intelligence?.self_assessment && (
+                  <p className="text-xs text-gray-400 mt-3 italic max-w-md mx-auto leading-relaxed">
+                    "{intelligence.self_assessment}"
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* ── Domain scores ── */}
+            {intelligence?.domain_scores && (
+              <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-3">Domain Intelligence</div>
+                <div className="space-y-2">
+                  {DOMAINS.map(d => {
+                    const score = intelligence.domain_scores[d.key] ?? 0;
+                    const domTier = getCareerTier(score);
+                    return (
+                      <div key={d.key}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm">{d.icon}</span>
+                          <span className="text-xs font-semibold text-white w-20 shrink-0">{d.label}</span>
+                          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                            <div className="h-full rounded-full transition-all duration-700"
+                              style={{ width: `${score}%`, background: domTier.color, boxShadow: `0 0 6px ${domTier.glow}` }} />
+                          </div>
+                          <span className="text-[10px] font-black shrink-0" style={{ color: domTier.color, width: 28, textAlign: 'right' }}>{score}</span>
+                          <span className="text-[9px] shrink-0 px-1.5 py-0.5 rounded" style={{ background: `${domTier.color}20`, color: domTier.color }}>{domTier.level}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── Strengths & Gaps ── */}
+            <div className="grid grid-cols-2 gap-3">
+              {intelligence?.strengths && intelligence.strengths.length > 0 && (
+                <div className="rounded-xl p-4" style={{ background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400/70 mb-2">✓ Strengths</div>
+                  <ul className="space-y-1.5">
+                    {intelligence.strengths.map((s, i) => (
+                      <li key={i} className="text-xs text-gray-300 flex gap-1.5">
+                        <span className="text-emerald-400/50 shrink-0">·</span><span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {intelligence?.knowledge_gaps && intelligence.knowledge_gaps.length > 0 && (
+                <div className="rounded-xl p-4" style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-red-400/70 mb-2">⚠ Knowledge Gaps</div>
+                  <ul className="space-y-1.5">
+                    {intelligence.knowledge_gaps.map((g, i) => (
+                      <li key={i} className="text-xs text-gray-300 flex gap-1.5">
+                        <span className="text-red-400/50 shrink-0">·</span><span>{g}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* ── Next milestone ── */}
+            {intelligence?.next_milestone && (
+              <div className="rounded-xl p-4" style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-yellow-400/70 mb-1">To reach {nextTier.icon} {nextTier.level}:</div>
+                <p className="text-sm text-gray-300">{intelligence.next_milestone}</p>
+              </div>
+            )}
+
+            {/* ── Career ladder ── */}
+            <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3">Career Path to CEO</div>
+              <div className="flex flex-wrap gap-2">
+                {CAREER_LADDER.filter((t,i,arr) => arr.findIndex(x=>x.level===t.level)===i).map(t => {
+                  const reached = intelligence && intelligence.career_score >= t.min;
+                  return (
+                    <div key={t.level} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all"
+                      style={{
+                        background: reached ? `${t.glow}` : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${reached ? t.color + '70' : 'rgba(255,255,255,0.07)'}`,
+                        color: reached ? t.color : '#374151',
+                        boxShadow: reached ? `0 0 8px ${t.glow}` : 'none',
+                      }}>
+                      <span>{t.icon}</span>
+                      <span>{t.level}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Grade button ── */}
+            <div className="pb-4 flex flex-col items-center gap-2">
+              {intelligence?.assessed_at && (
+                <div className="text-[10px] text-gray-600">
+                  Last assessed: {new Date(intelligence.assessed_at).toLocaleString()} · {intelligence.questions_answered} Q&As analyzed
+                </div>
+              )}
+              <button onClick={runSelfAssessment} disabled={grading || oracleState !== 'idle'}
+                className="px-6 py-2.5 rounded-xl text-sm font-black transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: grading ? 'rgba(255,255,255,0.04)' : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                  color: grading ? '#4b5563' : 'white',
+                  border: 'none',
+                  boxShadow: grading ? 'none' : '0 0 24px rgba(124,58,237,0.5)',
+                }}>
+                {grading ? '⟳ Grading...' : intelligence ? '↺ Re-Grade Myself' : '🎓 Grade Myself Now'}
+              </button>
+              <p className="text-[10px] text-gray-700 text-center max-w-xs">
+                Oracle queries all live business data and scores its own understanding across 7 domains. Goal: reach CEO level.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── BROWSE VIEW ───────────────────────────────────────────────────── */}
       {view === 'browse' && (
