@@ -93,7 +93,7 @@ function ChallengeNotification({
           boxShadow: '0 0 60px rgba(239,68,68,0.4), 0 0 120px rgba(239,68,68,0.15)',
         }}>
         {/* Pulse ring */}
-        <div className="absolute inset-0 rounded-2xl animate-ping"
+        <div className="absolute inset-0 rounded-2xl animate-ping pointer-events-none"
           style={{ border: '2px solid rgba(239,68,68,0.3)', animationDuration: '1.5s' }} />
 
         <div className="text-5xl animate-bounce">⚔️</div>
