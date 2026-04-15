@@ -69,3 +69,27 @@
   0%   { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(-60px); }
 }
+
+@keyframes badgeCelebFadeIn {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes badgePop {
+  0%   { opacity: 0; transform: scale(0.5) translateY(30px); }
+  60%  { transform: scale(1.06) translateY(-4px); }
+  80%  { transform: scale(0.97) translateY(2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes confettiFall {
+  0%   { opacity: 1; transform: translateY(-10px) rotate(0deg); }
+  100% { opacity: 0; transform: translateY(110vh) rotate(720deg); }
+}
+
+@keyframes confettiSway {
+  0%   { margin-left: 0; }
+  25%  { margin-left: 40px; }
+  75%  { margin-left: -40px; }
+  100% { margin-left: 0; }
+}

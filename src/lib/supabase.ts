@@ -690,3 +690,17 @@ export function subscribeToWorkSummaries(callback: (summary: DBWorkSummary) => v
     }, payload => callback(payload.new as DBWorkSummary))
     .subscribe();
 }
+
+// ─── Badge Celebration — notify when a member earns a new badge ───────────────
+
+export function subscribeToNewBadges(memberId: string, callback: (badge: DBBadge) => void) {
+  return supabase
+    .channel('mc_new_badges_' + memberId)
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'mc_badges',
+      filter: `member_id=eq.${memberId}`,
+    }, payload => callback(payload.new as DBBadge))
+    .subscribe();
+}

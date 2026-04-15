@@ -13,7 +13,7 @@ import AdminPanel from './components/AdminPanel';
 import WisdomOracle from './components/WisdomOracle';
 import LoginScreen from './components/LoginScreen';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
-import { TEAM_MEMBERS, getLevelTier, ZONES } from './data/gameData';
+import { TEAM_MEMBERS, getLevelTier, ZONES, BADGE_MAP } from './data/gameData';
 import {
   sendBattleChallenge,
   fetchPendingChallenges,
@@ -28,8 +28,9 @@ import {
   sendChatMessage,
   updateLoginStreak,
   addXp,
+  subscribeToNewBadges,
 } from './lib/supabase';
-import type { Zone, TeamMember } from './types';
+import type { Zone, TeamMember, Badge } from './types';
 import './index.css';
 
 type Tab = 'world' | 'dashboard' | 'calendar' | 'projects' | 'ideas' | 'badges' | 'leaderboard' | 'battles' | 'requests' | 'admin' | 'wisdom';
@@ -450,6 +451,9 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   const xpBubbleIdRef = useRef(0);
   const [xpBubbles, setXpBubbles] = useState<Array<{ id: number; delta: number; memberId: string }>>([]);
 
+  // Badge celebration modal
+  const [badgeCelebration, setBadgeCelebration] = useState<Badge | null>(null);
+
   // Live Supabase sync
   const { liveMembers, chatMessages, ready, sendChat, syncCoins } = useSupabaseSync(controlledMemberId);
 
@@ -480,6 +484,19 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     return () => {
       channelRef.current?.unsubscribe();
     };
+  }, [controlledMemberId]);
+
+  // ─── Subscribe to new badge awards — show celebration modal ─────────────────
+  useEffect(() => {
+    const sub = subscribeToNewBadges(controlledMemberId, (dbBadge) => {
+      const badge = BADGE_MAP[dbBadge.badge_id];
+      if (badge) {
+        setBadgeCelebration(badge);
+        // Auto-dismiss after 8 seconds
+        setTimeout(() => setBadgeCelebration(b => b?.id === badge.id ? null : b), 8000);
+      }
+    });
+    return () => { sub.unsubscribe(); };
   }, [controlledMemberId]);
 
   // ─── Global audio context unlock on first user interaction ──────────────────
@@ -604,11 +621,19 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
       case 'coffee_corner': {
         if (canEarnXp) {
           lastZoneVisitRef.current[zone.id] = now;
-          addXp(controlledMemberId, 5, '☕ Coffee corner energy boost');
-          showToast('+5 XP — caffeinated ☕', '⚡', '#8d6e63');
-          handleSendChat(`☕ grabbed a coffee and feels energized! (+5 XP)`);
+          addXp(controlledMemberId, 5, '☕ Coffee corner energy boost')
+            .then(() => {
+              showToast('+5 XP — caffeinated ☕', '⚡', '#8d6e63');
+              handleSendChat(`☕ grabbed a coffee and feels energized! (+5 XP)`);
+            })
+            .catch(() => {
+              showToast('Coffee machine broke — XP not awarded ☕', '❌', '#ef4444');
+              // Roll back cooldown so user can try again
+              delete lastZoneVisitRef.current[zone.id];
+            });
         } else {
-          showToast('Coffee Corner — come back later ☕', '☕', '#8d6e63');
+          const secsLeft = Math.ceil((COOLDOWN_MS - (now - lastVisit)) / 1000);
+          showToast(`☕ Coffee refreshes in ${secsLeft}s — hang tight`, '☕', '#8d6e63');
         }
         break;
       }
@@ -935,6 +960,106 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           </div>
         );
       })}
+
+      {/* ─── Badge Earned Celebration Modal ────────────────────────────────── */}
+      {badgeCelebration && (() => {
+        const CONFETTI_COLORS = ['#ffd700','#ff6b6b','#4ecdc4','#45b7d1','#a8e063','#ff9ff3','#feca57','#6c5ce7','#fd79a8','#00b894'];
+        const confettiPieces = Array.from({ length: 30 }).map((_, i) => ({
+          left: `${(i / 30) * 100 + (i % 2 === 0 ? 1.5 : -1.5)}%`,
+          size: 6 + (i % 5) * 2,
+          color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+          duration: 1.8 + (i % 7) * 0.3,
+          delay: (i % 8) * 0.08,
+          isRound: i % 3 === 0,
+        }));
+        return (
+          <div
+            onClick={() => setBadgeCelebration(null)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9998,
+              background: 'rgba(0,0,5,0.88)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backdropFilter: 'blur(10px)',
+              animation: 'badgeCelebFadeIn 0.3s ease',
+            }}
+          >
+            {/* Confetti */}
+            {confettiPieces.map((p, i) => (
+              <div key={i} style={{
+                position: 'absolute',
+                width: `${p.size}px`,
+                height: `${p.size}px`,
+                background: p.color,
+                left: p.left,
+                top: '-12px',
+                borderRadius: p.isRound ? '50%' : '2px',
+                animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
+                pointerEvents: 'none',
+              }} />
+            ))}
+
+            {/* Badge Card */}
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: 'linear-gradient(145deg, rgba(15,8,50,0.99) 0%, rgba(35,18,90,0.99) 100%)',
+                border: '2px solid rgba(255,215,0,0.55)',
+                borderRadius: '24px',
+                padding: '48px 52px',
+                textAlign: 'center',
+                maxWidth: '380px',
+                width: '90%',
+                boxShadow: '0 0 80px rgba(255,215,0,0.25), 0 24px 64px rgba(0,0,0,0.9)',
+                animation: 'badgePop 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) both',
+                position: 'relative',
+              }}
+            >
+              <div style={{ fontSize: '80px', lineHeight: 1, marginBottom: '16px', filter: 'drop-shadow(0 0 20px rgba(255,215,0,0.5))' }}>
+                {badgeCelebration.emoji}
+              </div>
+
+              <div style={{ color: '#ffd700', fontSize: '11px', fontWeight: 800, letterSpacing: '3px', textTransform: 'uppercase', marginBottom: '10px', opacity: 0.9 }}>
+                🏅 Badge Earned!
+              </div>
+
+              <div style={{ color: '#fff', fontSize: '26px', fontWeight: 800, marginBottom: '12px', lineHeight: 1.2 }}>
+                {badgeCelebration.name}
+              </div>
+
+              <div style={{ color: 'rgba(200,190,255,0.8)', fontSize: '14px', lineHeight: 1.6, marginBottom: '10px' }}>
+                {badgeCelebration.descriptor}
+              </div>
+
+              <div style={{ display: 'inline-block', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '28px',
+                background: badgeCelebration.rarity === 'legendary' ? 'rgba(255,165,0,0.2)' : badgeCelebration.rarity === 'epic' ? 'rgba(147,51,234,0.25)' : badgeCelebration.rarity === 'rare' ? 'rgba(59,130,246,0.25)' : 'rgba(107,114,128,0.25)',
+                color: badgeCelebration.rarity === 'legendary' ? '#fbbf24' : badgeCelebration.rarity === 'epic' ? '#c084fc' : badgeCelebration.rarity === 'rare' ? '#60a5fa' : '#9ca3af',
+                border: `1px solid ${badgeCelebration.rarity === 'legendary' ? 'rgba(251,191,36,0.4)' : badgeCelebration.rarity === 'epic' ? 'rgba(192,132,252,0.4)' : badgeCelebration.rarity === 'rare' ? 'rgba(96,165,250,0.4)' : 'rgba(156,163,175,0.3)'}`,
+              }}>
+                {badgeCelebration.rarity}
+              </div>
+
+              <br />
+              <button
+                onClick={() => setBadgeCelebration(null)}
+                style={{
+                  background: 'linear-gradient(90deg, #ffd700 0%, #f59e0b 100%)',
+                  color: '#0a0518',
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: '13px 36px',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  letterSpacing: '0.5px',
+                  boxShadow: '0 4px 20px rgba(255,215,0,0.4)',
+                }}
+              >
+                Claim It! 🎉
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
