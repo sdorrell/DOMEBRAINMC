@@ -454,6 +454,10 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   // Badge celebration modal
   const [badgeCelebration, setBadgeCelebration] = useState<Badge | null>(null);
 
+  // XP milestone fireworks
+  const [xpFireworks, setXpFireworks] = useState<{ milestone: number } | null>(null);
+  const milestonesHitRef = useRef<Set<string>>(new Set());
+
   // Live Supabase sync
   const { liveMembers, chatMessages, ready, sendChat, syncCoins } = useSupabaseSync(controlledMemberId);
 
@@ -542,6 +546,7 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   }, [ready, controlledMemberId]);
 
   // ─── XP gain detection — fires floating bubbles whenever any member gains XP ─
+  const XP_MILESTONES = [500, 1000, 2500, 5000, 10000];
   useEffect(() => {
     liveMembers.forEach(m => {
       const prev = prevXpRef.current[m.id];
@@ -550,10 +555,22 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
         const id = ++xpBubbleIdRef.current;
         setXpBubbles(curr => [...curr, { id, delta, memberId: m.id }]);
         setTimeout(() => setXpBubbles(curr => curr.filter(b => b.id !== id)), 2500);
+
+        // ── Milestone fireworks for the current user ──────────────────────────
+        if (m.id === controlledMemberId) {
+          XP_MILESTONES.forEach(ms => {
+            const key = `${m.id}-${ms}`;
+            if (prev < ms && m.xp >= ms && !milestonesHitRef.current.has(key)) {
+              milestonesHitRef.current.add(key);
+              setXpFireworks({ milestone: ms });
+              setTimeout(() => setXpFireworks(null), 5000);
+            }
+          });
+        }
       }
       prevXpRef.current[m.id] = m.xp;
     });
-  }, [liveMembers]);
+  }, [liveMembers, controlledMemberId]);
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -663,6 +680,16 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   };
 
   const handleSendChat = async (text: string) => {
+    // ── /log <message> quick-log shortcut ──────────────────────────────────────
+    if (text.trimStart().startsWith('/log ')) {
+      const logText = text.trimStart().slice(5).trim();
+      if (logText.length > 0) {
+        await logMeetingSession(me.name, logText, null, ['quick-log']);
+        await sendChat(`📝 Logged to DOME Brain: "${logText}"`);
+        showToast('Work summary saved to DOME Brain!', '📝', '#6366f1');
+      }
+      return;
+    }
     await sendChat(text);
     if (tab !== 'world') {
       setPulseTab('world');
@@ -1055,6 +1082,82 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
                 }}
               >
                 Claim It! 🎉
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ─── XP Milestone Fireworks Toast ──────────────────────────────────── */}
+      {xpFireworks && (() => {
+        const FIREWORK_COLORS = ['#ffd700','#ff6b6b','#4ecdc4','#a8e063','#ff9ff3','#feca57','#6c5ce7','#00b894','#fd79a8','#74b9ff'];
+        const particles = Array.from({ length: 40 }).map((_, i) => ({
+          left: `${20 + Math.sin(i * 0.8) * 30 + (i % 4) * 10}%`,
+          top: `${10 + (i % 6) * 12}%`,
+          size: 5 + (i % 4) * 3,
+          color: FIREWORK_COLORS[i % FIREWORK_COLORS.length],
+          duration: 1.5 + (i % 6) * 0.25,
+          delay: (i % 10) * 0.07,
+        }));
+        return (
+          <div
+            onClick={() => setXpFireworks(null)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9990,
+              background: 'rgba(0,0,0,0.82)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backdropFilter: 'blur(6px)',
+              cursor: 'pointer',
+            }}
+          >
+            {/* Firework particles */}
+            {particles.map((p, i) => (
+              <div key={i} style={{
+                position: 'absolute',
+                left: p.left, top: p.top,
+                width: `${p.size}px`, height: `${p.size}px`,
+                background: p.color,
+                borderRadius: i % 5 === 0 ? '2px' : '50%',
+                animation: `badgeConfetti ${p.duration}s ease-out ${p.delay}s infinite`,
+              }} />
+            ))}
+
+            {/* Central celebration card */}
+            <div style={{
+              position: 'relative',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
+              padding: '40px 48px',
+              borderRadius: '24px',
+              background: 'linear-gradient(135deg, #0d1117 0%, #1a0a2e 100%)',
+              border: '2px solid rgba(253,203,11,0.7)',
+              boxShadow: '0 0 80px rgba(253,203,11,0.35), 0 0 160px rgba(253,203,11,0.1)',
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: '52px', animation: 'badgeBounce 0.6s ease infinite alternate' }}>🎆</div>
+              <div style={{ color: '#fde68a', fontWeight: 900, fontSize: '22px', letterSpacing: '0.5px' }}>
+                MILESTONE REACHED!
+              </div>
+              <div style={{
+                color: '#ffd700', fontWeight: 800, fontSize: '36px',
+                textShadow: '0 0 24px rgba(255,215,0,0.6)',
+              }}>
+                {xpFireworks.milestone.toLocaleString()} XP
+              </div>
+              <div style={{ color: '#9ca3af', fontSize: '13px', maxWidth: '220px', lineHeight: 1.5 }}>
+                You've crossed a legendary XP threshold. The DOME bows before you. 🏆
+              </div>
+              <button
+                onClick={() => setXpFireworks(null)}
+                style={{
+                  marginTop: '8px',
+                  background: 'linear-gradient(135deg, #ffd700 0%, #f59e0b 100%)',
+                  color: '#0a0518', border: 'none', borderRadius: '12px',
+                  padding: '12px 32px', fontSize: '14px', fontWeight: 800,
+                  cursor: 'pointer', boxShadow: '0 4px 20px rgba(255,215,0,0.4)',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                Let's Go! 🔥
               </button>
             </div>
           </div>
