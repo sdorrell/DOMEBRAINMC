@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, BADGES, getLevelTier } from '../data/gameData';
-import { fetchWorkSummaries, type DBWorkSummary } from '../lib/supabase';
+import { fetchWorkSummaries, fetchWeeklyXpGains, type DBWorkSummary } from '../lib/supabase';
 import type { TeamMember } from '../types';
 
 function timeAgo(iso: string): string {
@@ -31,6 +31,114 @@ function resolveMember(teamMember: string): TeamMember | undefined {
   );
 }
 
+// ─── Weekly Wins Recap Banner ────────────────────────────────────────────────
+// Auto-implements the approved "Weekly Wins Recap Banner" suggestion — a
+// dismissible Monday summary of last week's top XP earner, new work summaries,
+// and total XP gained across the team. Shown only on Mondays, dismissible
+// per-week via localStorage.
+
+function useWeeklyRecap(members: TeamMember[], workLogs: DBWorkSummary[]) {
+  const [topEarner, setTopEarner] = useState<{ member: TeamMember; gain: number } | null>(null);
+  const [totalXp, setTotalXp] = useState(0);
+
+  useEffect(() => {
+    fetchWeeklyXpGains().then(gains => {
+      if (!gains.length) return;
+      const sumXp = gains.reduce((s, g) => s + g.gain, 0);
+      setTotalXp(sumXp);
+      const best = gains[0];
+      const m = members.find(mm => mm.id === best.memberId);
+      if (m && best.gain > 0) setTopEarner({ member: m, gain: best.gain });
+    });
+  }, [members]);
+
+  const weekStart = (() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  })();
+
+  const summariesThisWeek = workLogs.filter(l =>
+    new Date(l.created_at).getTime() >= weekStart.getTime()
+  ).length;
+
+  return { topEarner, totalXp, summariesThisWeek, weekStart };
+}
+
+function WeeklyWinsBanner({ members, workLogs }: { members: TeamMember[]; workLogs: DBWorkSummary[] }) {
+  const { topEarner, totalXp, summariesThisWeek, weekStart } = useWeeklyRecap(members, workLogs);
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    try {
+      const weekKey = weekStart.toISOString().slice(0, 10);
+      return localStorage.getItem('dome_weekly_recap_dismissed') === weekKey;
+    } catch { return false; }
+  });
+
+  // Only show on Mondays (day === 1)
+  const isMonday = new Date().getDay() === 1;
+  if (!isMonday || dismissed) return null;
+  if (!topEarner && summariesThisWeek === 0 && totalXp === 0) return null;
+
+  const handleDismiss = () => {
+    try {
+      const weekKey = weekStart.toISOString().slice(0, 10);
+      localStorage.setItem('dome_weekly_recap_dismissed', weekKey);
+    } catch { /* ignore */ }
+    setDismissed(true);
+  };
+
+  return (
+    <div
+      className="rounded-2xl p-4 flex items-center gap-4 shrink-0"
+      style={{
+        background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))',
+        border: '1px solid rgba(139,92,246,0.35)',
+        boxShadow: '0 0 24px rgba(99,102,241,0.12)',
+      }}
+    >
+      <div className="text-3xl shrink-0">🎉</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-300/80">
+          Monday Recap — Last Week at DOME
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          {topEarner && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-yellow-400">👑</span>
+              <span className="text-white font-bold">{topEarner.member.name}</span>
+              <span className="text-gray-400">led with</span>
+              <span className="text-yellow-400 font-black">+{topEarner.gain.toLocaleString()} XP</span>
+            </span>
+          )}
+          {summariesThisWeek > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span>🧠</span>
+              <span className="text-white font-bold">{summariesThisWeek}</span>
+              <span className="text-gray-400">work summaries</span>
+            </span>
+          )}
+          {totalXp > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span>⚡</span>
+              <span className="text-white font-bold">{totalXp.toLocaleString()}</span>
+              <span className="text-gray-400">team XP earned</span>
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={handleDismiss}
+        className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+        title="Dismiss until next Monday"
+      >✕</button>
+    </div>
+  );
+}
+
 export default function Dashboard({ liveMembers }: { liveMembers?: TeamMember[] }) {
   const members = liveMembers && liveMembers.length > 0 ? liveMembers : TEAM_MEMBERS;
   const [filter, setFilter] = useState<string>('all');
@@ -51,7 +159,9 @@ export default function Dashboard({ liveMembers }: { liveMembers?: TeamMember[] 
   });
 
   return (
-    <div className="h-full flex gap-4 overflow-hidden">
+    <div className="h-full flex flex-col gap-3 overflow-hidden">
+      <WeeklyWinsBanner members={members} workLogs={workLogs} />
+      <div className="flex-1 flex gap-4 overflow-hidden">
       {/* Left: team cards */}
       <div className="w-56 flex flex-col gap-3 shrink-0 overflow-y-auto pr-1">
         <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-1">Team</div>
@@ -187,6 +297,7 @@ export default function Dashboard({ liveMembers }: { liveMembers?: TeamMember[] 
             );
           })}
         </div>
+      </div>
       </div>
     </div>
   );
