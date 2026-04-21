@@ -12,6 +12,7 @@ import UpdateRequests from './components/UpdateRequests';
 import AdminPanel from './components/AdminPanel';
 import WisdomOracle from './components/WisdomOracle';
 import LoginScreen from './components/LoginScreen';
+import WelcomeTour, { shouldShowWelcomeTour } from './components/WelcomeTour';
 import { useSupabaseSync } from './hooks/useSupabaseSync';
 import { TEAM_MEMBERS, getLevelTier, ZONES, BADGE_MAP } from './data/gameData';
 import {
@@ -453,6 +454,9 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
 
   // Badge celebration modal
   const [badgeCelebration, setBadgeCelebration] = useState<Badge | null>(null);
+
+  // First-time welcome tour (fires once per user per browser)
+  const [showWelcomeTour, setShowWelcomeTour] = useState<boolean>(() => shouldShowWelcomeTour());
 
   // XP milestone fireworks
   const [xpFireworks, setXpFireworks] = useState<{ milestone: number } | null>(null);
@@ -946,6 +950,14 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
           liveMembers={liveMembers}
           onSendChat={handleSendChat}
           onClose={() => setDomeMeetingOpen(false)}
+        />
+      )}
+
+      {/* ── First-time Welcome Tour (one-time agent onboarding) ── */}
+      {showWelcomeTour && !battleEnemy && !topChallenge && (
+        <WelcomeTour
+          memberName={me.name.split(' ')[0]}
+          onDismiss={() => setShowWelcomeTour(false)}
         />
       )}
 
