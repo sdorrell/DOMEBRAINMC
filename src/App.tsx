@@ -30,6 +30,10 @@ import {
   updateLoginStreak,
   addXp,
   subscribeToNewBadges,
+  subscribeToIdeas,
+  subscribeToUpdateRequests,
+  fetchIdeas,
+  fetchUpdateRequests,
 } from './lib/supabase';
 import type { Zone, TeamMember, Badge } from './types';
 import './index.css';
@@ -462,6 +466,34 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
   const [xpFireworks, setXpFireworks] = useState<{ milestone: number } | null>(null);
   const milestonesHitRef = useRef<Set<string>>(new Set());
 
+  // ─── Tab activity dot badges ────────────────────────────────────────────────
+  // Shows a small red dot on nav tabs when new activity has happened since the
+  // user last visited that tab. Last-seen timestamps are persisted per-user in
+  // localStorage so dots survive reloads.
+  const [unreadTabs, setUnreadTabs] = useState<Set<Tab>>(new Set());
+
+  const lastSeenKey = useCallback(
+    (t: Tab) => `dome_last_seen_${controlledMemberId}_${t}`,
+    [controlledMemberId],
+  );
+
+  const markTabSeen = useCallback((t: Tab) => {
+    try { localStorage.setItem(lastSeenKey(t), String(Date.now())); } catch { /* ignore */ }
+    setUnreadTabs(prev => {
+      if (!prev.has(t)) return prev;
+      const next = new Set(prev);
+      next.delete(t);
+      return next;
+    });
+  }, [lastSeenKey]);
+
+  const getLastSeen = useCallback((t: Tab): number => {
+    try {
+      const v = localStorage.getItem(lastSeenKey(t));
+      return v ? parseInt(v, 10) : 0;
+    } catch { return 0; }
+  }, [lastSeenKey]);
+
   // Live Supabase sync
   const { liveMembers, chatMessages, ready, sendChat, syncCoins } = useSupabaseSync(controlledMemberId);
 
@@ -472,6 +504,67 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
 
   // Local coin state (optimistic, synced to DB after battle)
   const [playerCoins, setPlayerCoins] = useState<number>(me.coins);
+
+  // ─── Initial unread detection: compare latest DB timestamps vs last seen ───
+  useEffect(() => {
+    let cancelled = false;
+    async function detect() {
+      try {
+        const [ideas, requests] = await Promise.all([
+          fetchIdeas(),
+          fetchUpdateRequests(),
+        ]);
+        if (cancelled) return;
+
+        const newUnread = new Set<Tab>();
+        const latestIdea = ideas.reduce<number>((acc, i) => {
+          const t = new Date(i.created_at).getTime();
+          return t > acc ? t : acc;
+        }, 0);
+        if (latestIdea > getLastSeen('ideas')) newUnread.add('ideas');
+
+        const latestReq = requests.reduce<number>((acc, r) => {
+          const t = new Date(r.created_at).getTime();
+          return t > acc ? t : acc;
+        }, 0);
+        if (latestReq > getLastSeen('requests')) newUnread.add('requests');
+
+        setUnreadTabs(prev => {
+          const merged = new Set(prev);
+          newUnread.forEach(x => merged.add(x));
+          return merged;
+        });
+      } catch { /* ignore — detection is best-effort */ }
+    }
+    detect();
+    return () => { cancelled = true; };
+  }, [controlledMemberId, getLastSeen]);
+
+  // ─── Realtime: mark tabs unread when new items arrive elsewhere ────────────
+  useEffect(() => {
+    const ideasSub = subscribeToIdeas((idea) => {
+      if (idea.author_id === controlledMemberId) return; // own action → don't alert
+      setUnreadTabs(prev => {
+        if (prev.has('ideas')) return prev;
+        const next = new Set(prev);
+        next.add('ideas');
+        return next;
+      });
+    });
+    const reqSub = subscribeToUpdateRequests((req) => {
+      if (req.author_id === controlledMemberId) return;
+      setUnreadTabs(prev => {
+        if (prev.has('requests')) return prev;
+        const next = new Set(prev);
+        next.add('requests');
+        return next;
+      });
+    });
+    return () => {
+      ideasSub.unsubscribe();
+      reqSub.unsubscribe();
+    };
+  }, [controlledMemberId]);
 
   // ─── Load & subscribe to incoming challenges ─────────────────────────────────
   useEffect(() => {
@@ -506,6 +599,11 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
     });
     return () => { sub.unsubscribe(); };
   }, [controlledMemberId]);
+
+  // ─── Clear unread dot when the user lands on a tab ─────────────────────────
+  useEffect(() => {
+    markTabSeen(tab);
+  }, [tab, markTabSeen]);
 
   // ─── Global audio context unlock on first user interaction ──────────────────
   useEffect(() => {
@@ -862,17 +960,27 @@ function AppShell({ controlledMemberId, onLogout }: { controlledMemberId: string
 
         {/* Nav row — scrollable on mobile */}
         <nav className="flex gap-1 px-3 pb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className="relative shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1"
-              style={tab === t.id
-                ? { background: t.adminOnly ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.25)', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.55)' : 'rgba(99,102,241,0.45)'}`, color: t.adminOnly ? '#fde68a' : '#e0e7ff' }
-                : { background: t.adminOnly ? 'rgba(245,158,11,0.06)' : 'transparent', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.25)' : 'transparent'}`, color: t.adminOnly ? '#f59e0b' : '#6b7280' }}>
-              <span>{t.emoji}</span>
-              <span className="hidden sm:inline">{t.label}</span>
-              {pulseTab === t.id && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 animate-ping" />}
-            </button>
-          ))}
+          {TABS.map(t => {
+            const isUnread = unreadTabs.has(t.id) && tab !== t.id;
+            return (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className="relative shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1"
+                style={tab === t.id
+                  ? { background: t.adminOnly ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.25)', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.55)' : 'rgba(99,102,241,0.45)'}`, color: t.adminOnly ? '#fde68a' : '#e0e7ff' }
+                  : { background: t.adminOnly ? 'rgba(245,158,11,0.06)' : 'transparent', border: `1px solid ${t.adminOnly ? 'rgba(245,158,11,0.25)' : 'transparent'}`, color: t.adminOnly ? '#f59e0b' : '#6b7280' }}>
+                <span>{t.emoji}</span>
+                <span className="hidden sm:inline">{t.label}</span>
+                {pulseTab === t.id && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 animate-ping" />}
+                {isUnread && pulseTab !== t.id && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
+                    title="New activity"
+                    style={{ background: '#ef4444', boxShadow: '0 0 6px rgba(239,68,68,0.8)' }}
+                  />
+                )}
+              </button>
+            );
+          })}
         </nav>
       </header>
 
