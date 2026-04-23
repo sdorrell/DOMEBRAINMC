@@ -3,7 +3,7 @@ import {
   WORLD_COLS, WORLD_ROWS,
   ZONE_TILE_SET, ZONES, TEAM_MEMBERS, EMOTES, getLevelTier, WORK_LOGS,
 } from '../data/gameData';
-import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, updatePlayerState, type DBWorldRequest } from '../lib/supabase';
+import { createWorldRequest, fetchWorldRequests, toggleWorldRequestUpvote, subscribeToWorkSummaries, updatePlayerState, fetchWeeklyXpGains, type DBWorldRequest } from '../lib/supabase';
 import type { TeamMember, Zone, Emote } from '../types';
 
 // ─── ISO CONFIG ───────────────────────────────────────────────────────────────
@@ -712,6 +712,59 @@ function drawPolyAvatar(
   ctx.restore();
 }
 
+// ─── "IN DOME MEETING" BADGE (Green Couch Meeting Hub) ───────────────────────
+// Floating pill drawn above avatars parked on the green_couch zone. Gently
+// bobs with tick so it reads as alive rather than static.
+function drawMeetingBadge(ctx: CanvasRenderingContext2D, bx: number, by: number, tick: number) {
+  const bob = Math.sin(tick * 0.06) * 1.5;
+  const yTop = by - 82 + bob;
+  const label = '🛋️ In DOME Meeting';
+  ctx.save();
+  ctx.font = 'bold 10px system-ui, -apple-system, sans-serif';
+  const tw = ctx.measureText(label).width;
+  const padX = 6, padY = 3;
+  const w = tw + padX * 2;
+  const h = 16;
+  const x = bx - w / 2;
+  // Glow behind pill
+  ctx.shadowColor = 'rgba(105, 240, 122, 0.7)';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = 'rgba(10, 40, 16, 0.92)';
+  ctx.beginPath();
+  if ((ctx as unknown as { roundRect?: unknown }).roundRect) {
+    ctx.beginPath(); ctx.roundRect(x, yTop, w, h, 8); ctx.fill();
+  } else {
+    ctx.fillRect(x, yTop, w, h);
+  }
+  ctx.shadowBlur = 0;
+  // Border
+  ctx.strokeStyle = '#69f07a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if ((ctx as unknown as { roundRect?: unknown }).roundRect) {
+    ctx.beginPath(); ctx.roundRect(x, yTop, w, h, 8); ctx.stroke();
+  } else {
+    ctx.strokeRect(x, yTop, w, h);
+  }
+  // Label
+  ctx.fillStyle = '#d7fbde';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, bx, yTop + h / 2 + 0.5);
+  // Tail triangle pointing down to avatar
+  ctx.fillStyle = 'rgba(10, 40, 16, 0.92)';
+  ctx.beginPath();
+  ctx.moveTo(bx - 4, yTop + h);
+  ctx.lineTo(bx + 4, yTop + h);
+  ctx.lineTo(bx, yTop + h + 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#69f07a';
+  ctx.stroke();
+  void padY;
+  ctx.restore();
+}
+
 // ─── CLOUD RENDERER ───────────────────────────────────────────────────────────
 
 function drawCloud(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
@@ -800,6 +853,27 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
   const [hoveredMember, setHoveredMember] = useState<TeamMember | null>(null);
   const [nearbyMember, setNearbyMember] = useState<TeamMember | null>(null);
   const [showShop, setShowShop] = useState(false);
+  // ── Ambient weather: reflects team activity.
+  //   sunny      → team is crushing it (high weekly XP)
+  //   cloudy     → default/moderate
+  //   overcast   → quiet week
+  //   rain       → very quiet — team needs a nudge
+  const [weather, setWeather] = useState<'sunny' | 'cloudy' | 'overcast' | 'rain'>('cloudy');
+  const weatherRef = useRef<'sunny' | 'cloudy' | 'overcast' | 'rain'>('cloudy');
+  useEffect(() => { weatherRef.current = weather; }, [weather]);
+  useEffect(() => {
+    const computeWeather = async () => {
+      const gains = await fetchWeeklyXpGains();
+      const total = gains.reduce((s, g) => s + g.gain, 0);
+      if (total >= 1500) setWeather('sunny');
+      else if (total >= 500) setWeather('cloudy');
+      else if (total >= 100) setWeather('overcast');
+      else setWeather('rain');
+    };
+    computeWeather();
+    const id = setInterval(computeWeather, 5 * 60 * 1000); // refresh every 5 min
+    return () => clearInterval(id);
+  }, []);
   const [myCosmetics, setMyCosmetics] = useState<PlayerCosmetics>(() => {
     try {
       return JSON.parse(localStorage.getItem(`dome_cosmetics_${controlledMemberId}`) || '{}');
@@ -973,22 +1047,93 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
       const W = canvas.width, H = canvas.height;
       ctx.clearRect(0, 0, W, H);
 
-      // ── SKY GRADIENT BACKGROUND (Polytopia blue sky)
+      // ── SKY GRADIENT BACKGROUND (weather-aware)
+      const wx = weatherRef.current;
       const sky = ctx.createLinearGradient(0, 0, 0, H);
-      sky.addColorStop(0, '#2979ff');
-      sky.addColorStop(0.35, '#40c4ff');
-      sky.addColorStop(0.65, '#80deea');
-      sky.addColorStop(1, '#b2ebf2');
+      if (wx === 'sunny') {
+        sky.addColorStop(0, '#1e88e5');
+        sky.addColorStop(0.35, '#42a5f5');
+        sky.addColorStop(0.65, '#90caf9');
+        sky.addColorStop(1, '#fff3c4');
+      } else if (wx === 'overcast') {
+        sky.addColorStop(0, '#546e7a');
+        sky.addColorStop(0.5, '#78909c');
+        sky.addColorStop(1, '#b0bec5');
+      } else if (wx === 'rain') {
+        sky.addColorStop(0, '#37474f');
+        sky.addColorStop(0.5, '#546e7a');
+        sky.addColorStop(1, '#78909c');
+      } else {
+        // cloudy / default
+        sky.addColorStop(0, '#2979ff');
+        sky.addColorStop(0.35, '#40c4ff');
+        sky.addColorStop(0.65, '#80deea');
+        sky.addColorStop(1, '#b2ebf2');
+      }
       ctx.fillStyle = sky;
       ctx.fillRect(0, 0, W, H);
 
-      // ── CLOUDS (drifting slowly)
+      // ── SUNBEAMS (sunny only — soft diagonal gold rays)
+      if (wx === 'sunny') {
+        ctx.save();
+        ctx.globalAlpha = 0.18;
+        const beamCount = 6;
+        for (let i = 0; i < beamCount; i++) {
+          const bx = (W / beamCount) * i + ((tick * 0.3) % (W / beamCount));
+          const beam = ctx.createLinearGradient(bx, 0, bx + 80, H);
+          beam.addColorStop(0, 'rgba(255, 240, 150, 0.9)');
+          beam.addColorStop(1, 'rgba(255, 240, 150, 0)');
+          ctx.fillStyle = beam;
+          ctx.beginPath();
+          ctx.moveTo(bx, 0);
+          ctx.lineTo(bx + 40, 0);
+          ctx.lineTo(bx + 160, H);
+          ctx.lineTo(bx + 100, H);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // ── CLOUDS (drifting slowly — density depends on weather)
       const cloudOffset = (tick * 0.12) % (W + 200);
-      [[(-cloudOffset + 60) % W, H * 0.12, 0.7],
-       [(W - cloudOffset + 250) % W, H * 0.06, 0.5],
-       [(cloudOffset * 0.6 + 400) % W, H * 0.18, 0.55]].forEach(([cx,cy,cs]) => {
-        drawCloud(ctx, cx as number, cy as number, cs as number);
+      const cloudSpecs: [number, number, number][] =
+        wx === 'sunny'
+          ? [[(-cloudOffset + 60) % W, H * 0.12, 0.5]]
+          : wx === 'overcast' || wx === 'rain'
+          ? [
+              [(-cloudOffset + 60) % W, H * 0.1, 0.8],
+              [(W - cloudOffset + 180) % W, H * 0.05, 0.75],
+              [(cloudOffset * 0.6 + 320) % W, H * 0.14, 0.9],
+              [(-cloudOffset + 500) % W, H * 0.08, 0.7],
+              [(W - cloudOffset + 700) % W, H * 0.16, 0.65],
+            ]
+          : [
+              [(-cloudOffset + 60) % W, H * 0.12, 0.7],
+              [(W - cloudOffset + 250) % W, H * 0.06, 0.5],
+              [(cloudOffset * 0.6 + 400) % W, H * 0.18, 0.55],
+            ];
+      cloudSpecs.forEach(([cx, cy, cs]) => {
+        drawCloud(ctx, cx, cy, cs);
       });
+
+      // ── RAIN (cosmetic droplets, rain weather only)
+      if (wx === 'rain') {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(180, 210, 230, 0.55)';
+        ctx.lineWidth = 1;
+        const dropCount = 80;
+        for (let i = 0; i < dropCount; i++) {
+          const seed = i * 37.13;
+          const rx = ((seed * 97 + tick * 1.4) % W);
+          const ry = ((seed * 53 + tick * 6.2) % H);
+          ctx.beginPath();
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx - 2, ry + 8);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       // ── GROUND HORIZON (subtle)
       const horizGrad = ctx.createLinearGradient(0, H*0.55, 0, H*0.7);
@@ -1080,14 +1225,21 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
         const s = states[member.id];
         if (!s) continue;
         const { x: sx, y: sy } = iso(s.x, s.y, cam.x, cam.y);
+        const onCouch = ZONE_TILE_SET[`${s.x},${s.y}`]?.id === 'green_couch';
         items.push({
           sort: s.x+s.y+0.6,
-          draw: () => drawPolyAvatar(
-            ctx, member, sx, sy - WALL + TH/2,
-            member.id === controlledMemberId,
-            s.moving, s.frame, s.emote, s.emoteTimer, tick,
-            member.id === controlledMemberId ? myCosmeticsRef.current : undefined,
-          ),
+          draw: () => {
+            drawPolyAvatar(
+              ctx, member, sx, sy - WALL + TH/2,
+              member.id === controlledMemberId,
+              s.moving, s.frame, s.emote, s.emoteTimer, tick,
+              member.id === controlledMemberId ? myCosmeticsRef.current : undefined,
+            );
+            // ── Green Couch "In DOME Meeting" floating badge
+            if (onCouch) {
+              drawMeetingBadge(ctx, sx, sy - WALL + TH/2, tick);
+            }
+          },
         });
       }
 
@@ -1559,6 +1711,19 @@ export default function WorldMap({ controlledMemberId, onZoneEnter, onZoneAction
 
       {/* Right sidebar — hidden on mobile */}
       <div className="hidden sm:flex w-48 flex-col gap-3 shrink-0">
+        {/* Ambient Weather (team activity indicator) */}
+        <div className="rounded-xl p-3 flex items-center gap-2" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }} title="Weather reflects the team's weekly XP activity">
+          <span className="text-2xl leading-none">
+            {weather === 'sunny' ? '☀️' : weather === 'cloudy' ? '⛅' : weather === 'overcast' ? '☁️' : '🌧️'}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[9px] font-bold text-blue-300/60 uppercase tracking-wider">Team Weather</div>
+            <div className="text-[11px] font-semibold text-white capitalize">
+              {weather === 'sunny' ? 'Crushing It' : weather === 'cloudy' ? 'Steady Pace' : weather === 'overcast' ? 'Quiet Week' : 'Needs a Nudge'}
+            </div>
+          </div>
+        </div>
+
         {/* Online Now */}
         <div className="rounded-xl p-3" style={{ background:'rgba(0,10,30,0.65)', border:'1px solid rgba(255,255,255,0.1)' }}>
           <div className="text-[10px] font-bold text-blue-300/60 uppercase tracking-wider mb-2">Online Now</div>

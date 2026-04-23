@@ -1,8 +1,55 @@
 import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, BADGES, getLevelTier, WORK_LOGS, IDEAS } from '../data/gameData';
-import { fetchXpEvents, fetchWeeklyXpGains } from '../lib/supabase';
+import { fetchXpEvents, fetchWeeklyXpGains, fetchDailyXpGains } from '../lib/supabase';
 import type { DBXpEvent } from '../lib/supabase';
 import type { TeamMember } from '../types';
+
+// ─── XP Sparkline (14-day trend) ─────────────────────────────────────────────
+// Small inline SVG chart showing each member's daily XP gains for the past
+// 14 days. Makes the leaderboard feel dynamic and story-driven — a glance
+// tells you who's on a hot streak vs. who's been quiet.
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  if (!data || data.length === 0) {
+    return <div className="text-[9px] text-gray-600">—</div>;
+  }
+  const W = 60, H = 18;
+  const max = Math.max(...data, 1);
+  const n = data.length;
+  const points = data.map((v, i) => {
+    const x = n === 1 ? 0 : (i / (n - 1)) * W;
+    const y = H - (Math.max(0, v) / max) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const total = data.reduce((s, v) => s + v, 0);
+  const hot = total > 0 && data[data.length - 1] > (total / n);
+  return (
+    <div className="flex flex-col items-center gap-0.5" title={`Last 14 days: +${total} XP`}>
+      <svg width={W} height={H} style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id={`spark-${color.replace('#', '')}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon
+          points={`0,${H} ${points} ${W},${H}`}
+          fill={`url(#spark-${color.replace('#', '')})`}
+        />
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="text-[9px] font-medium" style={{ color: hot ? '#fbbf24' : '#6b7280' }}>
+        {hot ? '🔥 ' : ''}+{total}
+      </div>
+    </div>
+  );
+}
 
 function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = Math.min(100, (value / max) * 100);
@@ -121,6 +168,7 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
 
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [weeklyChamp, setWeeklyChamp] = useState<{ memberId: string; gain: number } | null>(null);
+  const [dailyGains, setDailyGains] = useState<Record<string, number[]>>({});
 
   useEffect(() => {
     fetchWeeklyXpGains().then(gains => {
@@ -128,6 +176,7 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
         setWeeklyChamp(gains[0]);
       }
     });
+    fetchDailyXpGains(14).then(setDailyGains);
   }, []);
 
   const logsByMember = Object.fromEntries(
@@ -237,6 +286,7 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
                   <th className="px-4 py-2 text-left text-xs text-gray-500 font-medium">Member</th>
                   <th className="px-4 py-2 text-left text-xs text-gray-500 font-medium">Level</th>
                   <th className="px-4 py-2 text-left text-xs text-gray-500 font-medium min-w-32">XP Progress</th>
+                  <th className="px-4 py-2 text-center text-xs text-gray-500 font-medium">14-Day Trend</th>
                   <th className="px-4 py-2 text-center text-xs text-gray-500 font-medium">Logs</th>
                   <th className="px-4 py-2 text-center text-xs text-gray-500 font-medium">Ideas</th>
                   <th className="px-4 py-2 text-center text-xs text-gray-500 font-medium">Votes</th>
@@ -291,6 +341,11 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
                       <td className="px-4 py-3 min-w-36">
                         <ProgressBar value={m.xp} max={topXP} color={m.avatarColor} />
                         <div className="text-[10px] text-gray-500 mt-0.5">{m.xp.toLocaleString()} / {m.xpToNext.toLocaleString()}</div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex justify-center">
+                          <Sparkline data={dailyGains[m.id] || []} color={m.avatarColor} />
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className="text-white font-medium">{logsByMember[m.id] || 0}</span>

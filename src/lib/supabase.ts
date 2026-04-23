@@ -678,6 +678,33 @@ export async function fetchWeeklyXpGains(): Promise<{ memberId: string; gain: nu
     .sort((a, b) => b.gain - a.gain);
 }
 
+// ─── Daily XP gains (for Leaderboard sparklines) ──────────────────────────────
+
+/**
+ * Returns per-member XP gains bucketed by day for the last `days` days.
+ * Index 0 = oldest day, index (days-1) = today. Members with no activity
+ * in the window are omitted from the result map.
+ */
+export async function fetchDailyXpGains(days: number = 14): Promise<Record<string, number[]>> {
+  const now = Date.now();
+  const start = new Date(now - days * 24 * 60 * 60 * 1000);
+  const startIso = start.toISOString();
+  const { data, error } = await supabase
+    .from('mc_xp_events')
+    .select('member_id, xp_delta, created_at')
+    .gte('created_at', startIso);
+  if (error) { console.error('fetchDailyXpGains:', error); return {}; }
+  const byMember: Record<string, number[]> = {};
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (const ev of data || []) {
+    const evTime = new Date(ev.created_at).getTime();
+    const dayIdx = Math.max(0, Math.min(days - 1, Math.floor((evTime - start.getTime()) / dayMs)));
+    if (!byMember[ev.member_id]) byMember[ev.member_id] = new Array(days).fill(0);
+    byMember[ev.member_id][dayIdx] += ev.xp_delta;
+  }
+  return byMember;
+}
+
 // ─── Work Summaries Realtime ──────────────────────────────────────────────────
 
 export function subscribeToWorkSummaries(callback: (summary: DBWorkSummary) => void) {
