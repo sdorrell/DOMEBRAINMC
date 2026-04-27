@@ -175,10 +175,74 @@ export async function logXpEvent(memberId: string, xpDelta: number, reason: stri
   if (error) console.error('logXpEvent:', error);
 }
 
+// ─── XP Happy Hour ────────────────────────────────────────────────────────
+//
+// When active, all positive XP gains get multiplied by `multiplier` (default 2×).
+// State is stored in mc_config under the keys:
+//   xp_happy_hour_ends_at   — ISO timestamp (string)
+//   xp_happy_hour_multiplier — number as string (e.g. "2")
+//
+// Negative XP events (penalties) are NEVER multiplied — fairness matters.
+
+export interface HappyHourState {
+  endsAt: number | null;        // epoch ms, or null when inactive
+  multiplier: number;           // e.g. 2
+}
+
+let _hhCache: { state: HappyHourState; checkedAt: number } | null = null;
+const HH_CACHE_TTL_MS = 20_000;
+
+export async function getHappyHour(): Promise<HappyHourState> {
+  const [endsRaw, multRaw] = await Promise.all([
+    getConfig('xp_happy_hour_ends_at'),
+    getConfig('xp_happy_hour_multiplier'),
+  ]);
+  const endsAt = endsRaw ? new Date(endsRaw).getTime() : null;
+  const multiplier = multRaw ? Number(multRaw) || 2 : 2;
+  return { endsAt: endsAt && !Number.isNaN(endsAt) ? endsAt : null, multiplier };
+}
+
+async function getHappyHourCached(): Promise<HappyHourState> {
+  if (_hhCache && Date.now() - _hhCache.checkedAt < HH_CACHE_TTL_MS) {
+    return _hhCache.state;
+  }
+  const fresh = await getHappyHour();
+  _hhCache = { state: fresh, checkedAt: Date.now() };
+  return fresh;
+}
+
+export async function startHappyHour(durationMinutes: number = 30, multiplier: number = 2): Promise<HappyHourState> {
+  const endsAt = new Date(Date.now() + durationMinutes * 60_000);
+  await Promise.all([
+    setConfig('xp_happy_hour_ends_at', endsAt.toISOString()),
+    setConfig('xp_happy_hour_multiplier', String(multiplier)),
+  ]);
+  _hhCache = null;
+  return { endsAt: endsAt.getTime(), multiplier };
+}
+
+export async function endHappyHour(): Promise<void> {
+  await setConfig('xp_happy_hour_ends_at', '');
+  _hhCache = null;
+}
+
 // ─── XP helper — log event + increment player XP atomically ───────────────
 
 export async function addXp(memberId: string, delta: number, reason: string): Promise<void> {
-  await logXpEvent(memberId, delta, reason);
+  let actualDelta = delta;
+  let actualReason = reason;
+
+  // Apply Happy Hour multiplier to positive gains only
+  if (delta > 0) {
+    const hh = await getHappyHourCached();
+    if (hh.endsAt && Date.now() < hh.endsAt && hh.multiplier > 1) {
+      actualDelta = Math.round(delta * hh.multiplier);
+      const bonus = actualDelta - delta;
+      actualReason = `${reason} 🔥 +${bonus} Happy Hour ${hh.multiplier}×`;
+    }
+  }
+
+  await logXpEvent(memberId, actualDelta, actualReason);
   const { data } = await supabase
     .from('mc_player_state')
     .select('xp')
@@ -187,7 +251,7 @@ export async function addXp(memberId: string, delta: number, reason: string): Pr
   if (data) {
     await supabase
       .from('mc_player_state')
-      .update({ xp: (data.xp || 0) + delta, updated_at: new Date().toISOString() })
+      .update({ xp: (data.xp || 0) + actualDelta, updated_at: new Date().toISOString() })
       .eq('member_id', memberId);
   }
 }

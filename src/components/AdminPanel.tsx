@@ -7,7 +7,10 @@ import {
   getConfig, setConfig,
   fetchWorkSummaries, getFlaggedSessions, flagSpamSession, unflagSpamSession,
   fetchWorldRequests, updateWorldRequestStatus,
+  getHappyHour, startHappyHour, endHappyHour,
+  sendChatMessage,
   type DBSuggestion, type DBUpdateRequest, type DBWorkSummary, type DBWorldRequest,
+  type HappyHourState,
 } from '../lib/supabase';
 import { TEAM_MEMBERS } from '../data/gameData';
 
@@ -63,6 +66,13 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
 
+  // XP Happy Hour state
+  const [happyHour, setHappyHour] = useState<HappyHourState | null>(null);
+  const [hhNow, setHhNow] = useState<number>(Date.now());
+  const [hhWorking, setHhWorking] = useState(false);
+  const [hhDuration, setHhDuration] = useState(30);
+  const [hhMultiplier, setHhMultiplier] = useState(2);
+
   useEffect(() => {
     Promise.all([
       fetchSuggestions(),
@@ -103,6 +113,39 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
   }, []);
 
   function supabaseSub(sub: any) { try { sub.unsubscribe(); } catch { /* ignore */ } }
+
+  // Load happy hour state on mount + refresh every 30s. Tick every 1s for countdown.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getHappyHour().then(s => { if (!cancelled) setHappyHour(s); });
+    };
+    refresh();
+    const refreshTimer = setInterval(refresh, 30_000);
+    const tickTimer = setInterval(() => setHhNow(Date.now()), 1_000);
+    return () => { cancelled = true; clearInterval(refreshTimer); clearInterval(tickTimer); };
+  }, []);
+
+  const hhActive = !!(happyHour?.endsAt && hhNow < happyHour.endsAt);
+
+  const handleStartHappyHour = async () => {
+    setHhWorking(true);
+    const state = await startHappyHour(hhDuration, hhMultiplier);
+    setHappyHour(state);
+    // Announce in chat
+    await sendChatMessage(
+      'dome-mc',
+      `🔥 XP HAPPY HOUR ACTIVATED! ${hhMultiplier}× XP on every gain for the next ${hhDuration} minutes — get grinding!`,
+    );
+    setHhWorking(false);
+  };
+
+  const handleEndHappyHour = async () => {
+    setHhWorking(true);
+    await endHappyHour();
+    setHappyHour({ endsAt: null, multiplier: hhMultiplier });
+    setHhWorking(false);
+  };
 
   const handleApproveSuggestion = async (id: string) => {
     setApproving(id);
@@ -617,6 +660,107 @@ export default function AdminPanel({ currentUserId }: { currentUserId: string })
             {/* ── Settings ── */}
             {activeSection === 'settings' && (
               <div className="flex flex-col gap-5">
+                {/* XP Happy Hour control */}
+                <div className="rounded-2xl p-5 flex flex-col gap-4"
+                  style={{
+                    background: hhActive
+                      ? 'linear-gradient(135deg, rgba(255,140,0,0.12), rgba(255,214,0,0.08))'
+                      : 'rgba(255,165,0,0.05)',
+                    border: `1px solid ${hhActive ? 'rgba(255,214,0,0.5)' : 'rgba(255,165,0,0.2)'}`,
+                    boxShadow: hhActive ? '0 0 24px rgba(255,165,0,0.2)' : 'none',
+                  }}>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-lg">🔥</span>
+                      <h3 className="text-white font-bold text-sm">XP Happy Hour</h3>
+                      {hhActive && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse"
+                          style={{ background: 'rgba(255,214,0,0.25)', color: '#fde047', border: '1px solid rgba(255,214,0,0.5)' }}>
+                          ● ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      Trigger a temporary XP multiplier across the whole team. Announced in World chat and shown as a glowing banner on the Leaderboard. Penalties (negative XP) are never multiplied.
+                    </p>
+                  </div>
+
+                  {hhActive && happyHour?.endsAt && (() => {
+                    const remainingMs = happyHour.endsAt - hhNow;
+                    const mins = Math.floor(remainingMs / 60_000);
+                    const secs = Math.floor((remainingMs % 60_000) / 1_000);
+                    return (
+                      <div className="flex items-center justify-between rounded-xl px-4 py-3"
+                        style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,214,0,0.3)' }}>
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-yellow-500/80 font-bold">Time Remaining</div>
+                          <div className="text-2xl font-black mt-0.5" style={{ color: '#fde047', fontVariantNumeric: 'tabular-nums' }}>
+                            {mins}:{secs.toString().padStart(2, '0')}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase tracking-widest text-yellow-500/80 font-bold">Multiplier</div>
+                          <div className="text-2xl font-black mt-0.5 text-yellow-300">{happyHour.multiplier}×</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {!hhActive && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-yellow-500/80 font-bold block mb-1">Duration</label>
+                        <select
+                          value={hhDuration}
+                          onChange={e => setHhDuration(Number(e.target.value))}
+                          className="w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+                          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <option value={15}>15 minutes</option>
+                          <option value={30}>30 minutes</option>
+                          <option value={45}>45 minutes</option>
+                          <option value={60}>60 minutes</option>
+                          <option value={120}>2 hours</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-yellow-500/80 font-bold block mb-1">Multiplier</label>
+                        <select
+                          value={hhMultiplier}
+                          onChange={e => setHhMultiplier(Number(e.target.value))}
+                          className="w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
+                          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <option value={2}>2× (Standard)</option>
+                          <option value={3}>3× (Spicy)</option>
+                          <option value={5}>5× (Insane)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2">
+                    {hhActive ? (
+                      <button
+                        onClick={handleEndHappyHour}
+                        disabled={hhWorking}
+                        className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
+                        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#9ca3af' }}>
+                        {hhWorking ? '...' : 'End Happy Hour'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleStartHappyHour}
+                        disabled={hhWorking}
+                        className="px-5 py-2 rounded-xl text-sm font-black text-white transition-all hover:scale-105 disabled:opacity-40"
+                        style={{
+                          background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
+                          boxShadow: '0 0 18px rgba(245,158,11,0.4)',
+                        }}>
+                        {hhWorking ? 'Starting...' : `🔥 Start ${hhDuration}-min ${hhMultiplier}× XP`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {/* Prompt customization */}
                 <div className="rounded-2xl p-5 flex flex-col gap-4"
                   style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)' }}>

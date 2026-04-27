@@ -1,8 +1,61 @@
 import { useState, useEffect } from 'react';
 import { TEAM_MEMBERS, BADGES, getLevelTier, WORK_LOGS, IDEAS } from '../data/gameData';
-import { fetchXpEvents, fetchWeeklyXpGains, fetchDailyXpGains } from '../lib/supabase';
-import type { DBXpEvent } from '../lib/supabase';
+import { fetchXpEvents, fetchWeeklyXpGains, fetchDailyXpGains, getHappyHour } from '../lib/supabase';
+import type { DBXpEvent, HappyHourState } from '../lib/supabase';
 import type { TeamMember } from '../types';
+
+// ─── XP Happy Hour Banner ────────────────────────────────────────────────────
+// Polls Supabase config and ticks every second to render countdown.
+function HappyHourBanner() {
+  const [hh, setHh] = useState<HappyHourState | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Refresh state every 30s, tick clock every 1s
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getHappyHour().then(s => { if (!cancelled) setHh(s); });
+    };
+    refresh();
+    const refreshTimer = setInterval(refresh, 30_000);
+    const tickTimer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => { cancelled = true; clearInterval(refreshTimer); clearInterval(tickTimer); };
+  }, []);
+
+  if (!hh || !hh.endsAt || now >= hh.endsAt) return null;
+
+  const remainingMs = hh.endsAt - now;
+  const mins = Math.floor(remainingMs / 60_000);
+  const secs = Math.floor((remainingMs % 60_000) / 1_000);
+  const remaining = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+  return (
+    <div
+      className="flex items-center gap-3 px-4 py-2.5 rounded-xl animate-pulse"
+      style={{
+        background: 'linear-gradient(135deg, rgba(255,140,0,0.18), rgba(255,214,0,0.14))',
+        border: '1px solid rgba(255,214,0,0.6)',
+        boxShadow: '0 0 28px rgba(255,165,0,0.35), inset 0 0 12px rgba(255,214,0,0.1)',
+      }}
+    >
+      <span className="text-2xl">🔥</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-yellow-300">
+          XP Happy Hour Active
+        </div>
+        <div className="text-sm font-black text-white mt-0.5">
+          {hh.multiplier}× XP on every gain — keep grinding!
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="font-black text-base" style={{ color: '#fde047', fontVariantNumeric: 'tabular-nums' }}>
+          {remaining}
+        </div>
+        <div className="text-[10px] text-yellow-500/80">remaining</div>
+      </div>
+    </div>
+  );
+}
 
 // ─── XP Sparkline (14-day trend) ─────────────────────────────────────────────
 // Small inline SVG chart showing each member's daily XP gains for the past
@@ -198,6 +251,9 @@ export default function Leaderboard({ liveMembers }: { liveMembers?: TeamMember[
           <h2 className="text-lg font-bold text-white">🏆 Leaderboard</h2>
           <p className="text-xs text-gray-400">XP rankings, badge counts, contribution stats. <span className="text-indigo-400">Click any row to see XP breakdown.</span></p>
         </div>
+
+        {/* XP Happy Hour Banner — shows when active */}
+        <HappyHourBanner />
 
         {/* Weekly Champion Banner */}
         {weeklyChamp && (() => {
